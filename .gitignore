@@ -4,13 +4,21 @@ node_modules/
 # next.js build output
 .next/
 out/
+dist/
+
+# test / reports
+coverage/
 
 # environment files
 .env
 .env.local
 .env.*.local
+# other dotenv variants (keep an example file trackable if needed)
+.env.*
+!.env.example
 
 # logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -37,3 +45,16 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# local deploy / caches
+.vercel/
+.turbo/
+
+# local secrets / session exports (manual dumps)
+cookies.txt
+*-cookies.txt
+.session.*
+
+# optional local DB / dump artifacts
+*.sqlite
+*.sqlite3
