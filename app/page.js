@@ -14,6 +14,13 @@ import {
 } from "./lib/imageStore";
 import { runMockSemanticAnalysis } from "./lib/semanticAnalysisService";
 import { SemanticAnalysisCards } from "./components/SemanticAnalysisCards";
+import {
+  normalizeSemanticDraft,
+  createSemanticDraftFromPrompt,
+  createSemanticDraftFromEdit,
+  extractPossibleProductCategories,
+} from "./lib/visualParsingService";
+import { appendEditRequest, patchEditRequest } from "./lib/editRequestsStore";
 
 /** Atmosphere modes (image API + badges). English labels as design system. */
 const ATMOSPHERE_KEYS = [
@@ -56,6 +63,92 @@ const ATMOSPHERE_SWATCH = {
   silver_mist: "#D9D5E3",
   warm_editorial: "#C8A78F",
 };
+
+const IT_BASE_GENERATION = "base_generation";
+const IT_VARIATION = "variation";
+const IT_TEXT_EDIT_MOCK = "text_edit_mock";
+const IT_IMAGE_EDIT = "image_edit";
+const IT_SKU_REPLACE_PENDING = "sku_replace_pending";
+
+function migrateIterationTypeStored(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  if (raw === "text_edit") return IT_TEXT_EDIT_MOCK;
+  return raw;
+}
+
+function deriveIterationLabelFrom(meta) {
+  const it = migrateIterationTypeStored(meta.iterationType);
+  if (typeof meta.iterationLabel === "string" && meta.iterationLabel.trim()) {
+    return meta.iterationLabel.trim();
+  }
+  if (it === IT_BASE_GENERATION) return "ОСНОВНОЙ";
+  if (it === IT_VARIATION) return "ВАРИАНТ";
+  if (it === IT_TEXT_EDIT_MOCK) return "ПРАВКА";
+  if (it === IT_IMAGE_EDIT) return "ТОЧНАЯ ПРАВКА";
+  if (it === IT_SKU_REPLACE_PENDING) return "ЗАМЕНА";
+  return "";
+}
+
+function visualIterationBadgeText(item) {
+  if (!item) return "ОСНОВНОЙ";
+  const lbl = deriveIterationLabelFrom({
+    iterationType: item.iterationType,
+    iterationLabel: item.iterationLabel,
+  });
+  if (lbl) return lbl;
+  const it = migrateIterationTypeStored(item.iterationType);
+  if (it === IT_TEXT_EDIT_MOCK) return "ПРАВКА";
+  if (it === IT_IMAGE_EDIT) return "ТОЧНАЯ ПРАВКА";
+  if (it === IT_SKU_REPLACE_PENDING) return "ЗАМЕНА";
+  if (item.variationLabel) return item.variationLabel;
+  if (item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]) {
+    return ALTERNATE_KIND_LABEL_RU[item.alternateKind];
+  }
+  return "ОСНОВНОЙ";
+}
+
+const EDIT_UI_MODES = [
+  { id: "text_iteration", editMode: "text_mock", label: "Текстовая итерация", disabled: false },
+  {
+    id: "precise_image",
+    editMode: "image_to_image_future",
+    label: "Точная правка изображения",
+    disabled: false,
+  },
+  { id: "sku_replace", editMode: "replace_object_future", label: "Замена изделия", disabled: true, soon: true },
+];
+
+function persistStoredSelectedVisual(projectKey, visualId) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    if (!projectKey || !String(projectKey).trim() || !visualId || !String(visualId).trim()) return;
+    localStorage.setItem(
+      OSA_SELECTED_VISUAL_KEY,
+      JSON.stringify({
+        projectKey: String(projectKey).trim(),
+        visualId: String(visualId).trim(),
+      })
+    );
+  } catch (e) {
+    console.warn("OSA: persist selected visual failed", e);
+  }
+}
+
+function pickStoredPreferredVisualId(projectKey, idList) {
+  if (typeof localStorage === "undefined" || !projectKey || !String(projectKey).trim()) return null;
+  if (!Array.isArray(idList) || !idList.length) return null;
+  try {
+    const raw = localStorage.getItem(OSA_SELECTED_VISUAL_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || o.projectKey !== String(projectKey).trim()) return null;
+    const id = o.visualId != null ? String(o.visualId) : "";
+    if (!id || !idList.includes(id)) return null;
+    return id;
+  } catch {
+    return null;
+  }
+}
 
 function AtmosphereDropdown({ value, onChange, disabled, isDark }) {
   const [open, setOpen] = useState(false);
@@ -281,6 +374,7 @@ function AtmosphereDropdown({ value, onChange, disabled, isDark }) {
 const OSA_VISUAL_HISTORY_KEY = "osa-visual-history-v1";
 const OSA_PROJECT_PROMPTS_KEY = "osa-project-prompts-v1";
 const OSA_ACTIVE_PROJECT_KEY = "osa-active-project-v1";
+const OSA_SELECTED_VISUAL_KEY = "osa-selected-visual-v1";
 const OSA_ACTIVE_PROMPT_VERSION_KEY = "osa-active-prompt-version-v1";
 const OSA_VISUAL_HISTORY_LEGACY_KEYS = [
   "osa-visual-history",
@@ -565,6 +659,20 @@ function normalizePalette(p) {
   };
 }
 
+/** Preserve in-memory thumbnails when metadata rows are IndexedDB-backed (empty inline base64). */
+function mergeSessionGallerySnapshots(prevGallery, nextGallery) {
+  if (!Array.isArray(nextGallery) || nextGallery.length === 0) {
+    return Array.isArray(prevGallery) ? prevGallery : [];
+  }
+  const prevById = new Map((prevGallery || []).map((v) => [v.id, v]));
+  return nextGallery.map((row) => {
+    const prev = prevById.get(row.id);
+    const rowB64 = row.imageBase64 && String(row.imageBase64).trim() ? row.imageBase64 : "";
+    const prevB64 = prev?.imageBase64 && String(prev.imageBase64).trim() ? prev.imageBase64 : "";
+    return rowB64 ? row : { ...row, imageBase64: prevB64 || "" };
+  });
+}
+
 function normalizeSavedVisual(item) {
   if (!item || typeof item !== "object") return null;
   if (item.id === undefined || item.id === null) return null;
@@ -577,6 +685,48 @@ function normalizeSavedVisual(item) {
   const projectKeyRaw = item.projectKey ?? item.conceptKey;
   const projectKey =
     typeof projectKeyRaw === "string" && projectKeyRaw.trim() ? projectKeyRaw.trim() : "";
+  const legacyParent =
+    typeof item.editOfVisualId === "string" && item.editOfVisualId.trim()
+      ? item.editOfVisualId.trim()
+      : null;
+  const parentVisualIdRaw = item.parentVisualId;
+  const parentVisualId =
+    typeof parentVisualIdRaw === "string" && parentVisualIdRaw.trim()
+      ? parentVisualIdRaw.trim()
+      : legacyParent;
+  const iterationType = migrateIterationTypeStored(
+    typeof item.iterationType === "string" ? item.iterationType : ""
+  );
+  const sourceVisualIdRaw = item.sourceVisualId;
+  const sourceVisualId =
+    typeof sourceVisualIdRaw === "string" && sourceVisualIdRaw.trim()
+      ? sourceVisualIdRaw.trim()
+      : null;
+  const sourceImageIdRaw = item.sourceImageId;
+  const sourceImageId =
+    typeof sourceImageIdRaw === "string" && sourceImageIdRaw.trim()
+      ? sourceImageIdRaw.trim()
+      : (iterationType === IT_TEXT_EDIT_MOCK || iterationType === IT_IMAGE_EDIT) && parentVisualId
+        ? parentVisualId
+        : null;
+  const sourceImageBase64Available = item.sourceImageBase64Available === true;
+  const sourcePromptText =
+    typeof item.sourcePromptText === "string" ? item.sourcePromptText : "";
+  const editRequestId =
+    typeof item.editRequestId === "string" && item.editRequestId.trim()
+      ? item.editRequestId.trim()
+      : null;
+  const iterationLabel = deriveIterationLabelFrom({
+    iterationType,
+    iterationLabel: typeof item.iterationLabel === "string" ? item.iterationLabel : "",
+  });
+  const semanticDraft = normalizeSemanticDraft(item.semanticDraft);
+  const editPromptRaw =
+    typeof item.editPrompt === "string" && item.editPrompt.trim()
+      ? item.editPrompt.trim()
+      : typeof item.editInstruction === "string" && item.editInstruction.trim()
+        ? item.editInstruction.trim()
+        : "";
   return {
     id: String(item.id),
     imageBase64: legacyB64 ? item.imageBase64 : "",
@@ -584,9 +734,18 @@ function normalizeSavedVisual(item) {
     promptText: typeof item.promptText === "string" ? item.promptText : "",
     promptVersionId: typeof item.promptVersionId === "string" ? item.promptVersionId : null,
     variationLabel: typeof item.variationLabel === "string" ? item.variationLabel : "",
-    editOfVisualId: typeof item.editOfVisualId === "string" ? item.editOfVisualId : null,
+    editOfVisualId: legacyParent,
+    parentVisualId,
+    sourceVisualId,
+    sourceImageId,
+    sourceImageBase64Available,
+    sourcePromptText,
+    editRequestId,
+    iterationLabel,
+    semanticDraft,
+    editPrompt: editPromptRaw,
     editInstruction: typeof item.editInstruction === "string" ? item.editInstruction : "",
-    iterationType: typeof item.iterationType === "string" ? item.iterationType : "",
+    iterationType,
     title: typeof item.title === "string" ? item.title : "",
     style: typeof item.style === "string" ? item.style : "",
     mood: typeof item.mood === "string" ? item.mood : "",
@@ -599,6 +758,7 @@ function normalizeSavedVisual(item) {
 }
 
 function visualToLocalStorageRecord(v) {
+  const it = migrateIterationTypeStored(typeof v.iterationType === "string" ? v.iterationType : "");
   return {
     id: String(v.id),
     promptUsed: typeof v.promptUsed === "string" ? v.promptUsed : "",
@@ -606,8 +766,23 @@ function visualToLocalStorageRecord(v) {
     promptVersionId: typeof v.promptVersionId === "string" ? v.promptVersionId : null,
     variationLabel: typeof v.variationLabel === "string" ? v.variationLabel : "",
     editOfVisualId: typeof v.editOfVisualId === "string" ? v.editOfVisualId : null,
+    parentVisualId: typeof v.parentVisualId === "string" ? v.parentVisualId : null,
+    sourceVisualId: typeof v.sourceVisualId === "string" ? v.sourceVisualId : null,
+    sourceImageId: typeof v.sourceImageId === "string" ? v.sourceImageId : null,
+    sourceImageBase64Available: v.sourceImageBase64Available === true,
+    sourcePromptText: typeof v.sourcePromptText === "string" ? v.sourcePromptText : "",
+    editRequestId: typeof v.editRequestId === "string" ? v.editRequestId : null,
+    semanticDraft: normalizeSemanticDraft(v.semanticDraft),
+    editPrompt: typeof v.editPrompt === "string" ? v.editPrompt : "",
     editInstruction: typeof v.editInstruction === "string" ? v.editInstruction : "",
-    iterationType: typeof v.iterationType === "string" ? v.iterationType : "",
+    iterationType: it,
+    iterationLabel:
+      typeof v.iterationLabel === "string" && v.iterationLabel.trim()
+        ? v.iterationLabel.trim()
+        : deriveIterationLabelFrom({
+            iterationType: it,
+            iterationLabel: "",
+          }),
     title: typeof v.title === "string" ? v.title : "",
     style: typeof v.style === "string" ? v.style : "",
     mood: typeof v.mood === "string" ? v.mood : "",
@@ -1098,6 +1273,8 @@ export default function Home() {
   const stablePreviewBase64Ref = useRef("");
   const [promptVersions, setPromptVersions] = useState([]);
   const [visualEditInstruction, setVisualEditInstruction] = useState("");
+  const [visualEditIterationMode, setVisualEditIterationMode] = useState("text_iteration");
+  const [visualEditIterationNotice, setVisualEditIterationNotice] = useState("");
   const [promptSaveNotice, setPromptSaveNotice] = useState("");
   const [activePromptVersionId, setActivePromptVersionIdState] = useState(null);
   const [promptHistoryOpen, setPromptHistoryOpen] = useState(false);
@@ -1546,15 +1723,37 @@ export default function Home() {
       promptVersionId: item.promptVersionId ?? null,
       variationLabel: item.variationLabel || "",
       editOfVisualId: item.editOfVisualId ?? null,
+      parentVisualId: item.parentVisualId ?? null,
+      sourceVisualId: item.sourceVisualId ?? null,
+      sourceImageId: item.sourceImageId ?? null,
+      sourceImageBase64Available: item.sourceImageBase64Available === true,
+      sourcePromptText: typeof item.sourcePromptText === "string" ? item.sourcePromptText : "",
+      editRequestId: item.editRequestId ?? null,
       editInstruction: item.editInstruction || "",
+      editPrompt: item.editPrompt || item.editInstruction || "",
+      iterationLabel: deriveIterationLabelFrom({
+        iterationType: item.iterationType || "",
+        iterationLabel: typeof item.iterationLabel === "string" ? item.iterationLabel : "",
+      }),
       iterationType: item.iterationType || "",
       createdAt: item.createdAt,
       alternateKind: item.alternateKind ?? null,
+      title: typeof item.title === "string" ? item.title : "",
+      style: typeof item.style === "string" ? item.style : "",
+      mood: typeof item.mood === "string" ? item.mood : "",
+      palette: normalizePalette(item.palette),
+      projectKey: typeof item.projectKey === "string" ? item.projectKey : "",
+      semanticDraft: normalizeSemanticDraft(item.semanticDraft),
     }));
-    setSessionVisualGallery(nextGallery);
-    setSelectedSessionVisualId((sel) => {
-      if (sel && nextGallery.some((x) => x.id === sel)) return sel;
-      return nextGallery[0].id;
+    setSessionVisualGallery((prevGallery) =>
+      mergeSessionGallerySnapshots(prevGallery, nextGallery)
+    );
+    const galleryIds = nextGallery.map((x) => x.id);
+    const preferred = pickStoredPreferredVisualId(activeProjectKey, galleryIds);
+    setSelectedSessionVisualId((prevSel) => {
+      if (preferred) return preferred;
+      if (prevSel && nextGallery.some((x) => x.id === prevSel)) return prevSel;
+      return nextGallery[0]?.id ?? null;
     });
     setResultData((prev) => {
       if (resultDataMatchesActiveProject(prev, activeProjectKey)) {
@@ -1591,6 +1790,11 @@ export default function Home() {
       return `Концепция «${proj.title}»`;
     });
   }, [activeProjectKey, projectList]);
+
+  useEffect(() => {
+    if (!activeProjectKey || !selectedSessionVisualId) return;
+    persistStoredSelectedVisual(activeProjectKey, selectedSessionVisualId);
+  }, [activeProjectKey, selectedSessionVisualId]);
 
   useEffect(() => {
     if (!activeProjectKey) return;
@@ -2865,6 +3069,15 @@ export default function Home() {
         throw new Error("Сервер вернул пустое изображение.");
       }
 
+      const semanticDraftRaw = createSemanticDraftFromPrompt(promptLink.promptText);
+      const inferredCats = extractPossibleProductCategories(semanticDraftRaw);
+      const semanticDraft = normalizeSemanticDraft({
+        ...semanticDraftRaw,
+        possibleCategories: [
+          ...new Set([...(semanticDraftRaw.possibleCategories || []), ...inferredCats]),
+        ].slice(0, 32),
+      });
+
       const newItem = {
         id: newStableId(),
         imageBase64: nextB64,
@@ -2877,7 +3090,16 @@ export default function Home() {
             : "",
         editOfVisualId: null,
         editInstruction: "",
-        iterationType: "",
+        iterationLabel: isAlternate ? "ВАРИАНТ" : "ОСНОВНОЙ",
+        iterationType: isAlternate ? IT_VARIATION : IT_BASE_GENERATION,
+        semanticDraft,
+        parentVisualId: null,
+        sourceVisualId: null,
+        sourceImageId: null,
+        sourceImageBase64Available: false,
+        sourcePromptText: "",
+        editRequestId: null,
+        editPrompt: "",
         createdAt: new Date().toISOString(),
         alternateKind: atmospherePicked,
       };
@@ -2943,8 +3165,39 @@ export default function Home() {
     const instruction = String(visualEditInstruction || "").trim();
     if (!instruction) return;
 
+    const uiModeRow = EDIT_UI_MODES.find((m) => m.id === visualEditIterationMode);
+    if (!uiModeRow || uiModeRow.disabled) {
+      setVisualEditIterationNotice("Этот режим будет подключён позже");
+      window.setTimeout(() => setVisualEditIterationNotice(""), 3200);
+      return;
+    }
+
+    const editSourceVisual = selectedSessionVisual;
+    const parentVisualIdForEdit = editSourceVisual.id;
+    const lineageSourceVisualId =
+      (editSourceVisual.sourceVisualId && String(editSourceVisual.sourceVisualId).trim()) ||
+      parentVisualIdForEdit;
+
+    const inheritedTitle =
+      (editSourceVisual.title && String(editSourceVisual.title).trim()) ||
+      (typeof resultData.title === "string" ? resultData.title : "");
+    const inheritedStyle =
+      (editSourceVisual.style && String(editSourceVisual.style).trim()) ||
+      (typeof resultData.style === "string" ? resultData.style : "");
+    const inheritedMood =
+      (editSourceVisual.mood && String(editSourceVisual.mood).trim()) ||
+      (typeof resultData.mood === "string" ? resultData.mood : "");
+    const inheritedPalette = normalizePalette(
+      editSourceVisual.palette ?? resultData?.palette ?? {}
+    );
+    const parentAlternate = editSourceVisual.alternateKind;
+    const inheritedAlternateKind =
+      typeof parentAlternate === "string" && ALTERNATE_KIND_KEYS.includes(parentAlternate)
+        ? parentAlternate
+        : null;
+
     if (process.env.NODE_ENV === "development") {
-      console.log("[OSA][dev] selectedSessionVisual before edit", selectedSessionVisual);
+      console.log("[OSA][dev] selectedSessionVisual before edit", editSourceVisual);
       console.log("[OSA][dev] preview image source", {
         selectedSessionVisualId,
         previewLen: (previewImageBase64 || "").length,
@@ -2955,39 +3208,245 @@ export default function Home() {
     }
 
     const basePrompt =
-      (selectedSessionVisual.promptText && String(selectedSessionVisual.promptText).trim()) ||
-      (selectedSessionVisual.promptUsed && String(selectedSessionVisual.promptUsed).trim()) ||
+      (editSourceVisual.promptText && String(editSourceVisual.promptText).trim()) ||
+      (editSourceVisual.promptUsed && String(editSourceVisual.promptUsed).trim()) ||
       interiorDescription.trim();
-    if (!basePrompt) return;
 
-    const prompt = [
-      "Create a new iteration based on the previous interior concept.",
-      "Keep the overall composition and room logic unless the user asks otherwise.",
-      `Apply these changes: ${instruction}.`,
-      "Avoid changing unrelated elements.",
-      "Maintain photorealistic interior render quality.",
-      "No text, no watermark, no logos.",
-      "",
-      "Previous concept:",
-      basePrompt,
-    ].join("\n");
+    const isTextMock = uiModeRow.editMode === "text_mock";
+    const isImagePrecise = uiModeRow.editMode === "image_to_image_future";
+    if (isTextMock && !basePrompt) return;
+
+    const prompt = isTextMock
+      ? [
+          "Create a new iteration based on the previous interior concept.",
+          "Keep the overall composition and room logic unless the user asks otherwise.",
+          `Apply these changes: ${instruction}.`,
+          "Avoid changing unrelated elements.",
+          "Maintain photorealistic interior render quality.",
+          "No text, no watermark, no logos.",
+          "",
+          "Previous concept:",
+          basePrompt,
+        ].join("\n")
+      : "";
 
     const atmospherePicked = ATMOSPHERE_KEYS.includes(atmosphereChoice)
       ? atmosphereChoice
       : "architectural_white";
 
-    setImageRequestKind("text_edit");
+    let projectKey = resultData.projectKey;
+    if (!projectKey || !String(projectKey).trim()) {
+      projectKey = newStableId();
+      setResultData((prev) => (prev ? { ...prev, projectKey } : prev));
+    }
+    const resultDataForApi = { ...resultData, projectKey };
+
+    let sourceImageBase64 =
+      editSourceVisual.imageBase64 && String(editSourceVisual.imageBase64).trim()
+        ? String(editSourceVisual.imageBase64).trim()
+        : "";
+    let sourceImageBase64Available = !!sourceImageBase64;
+    if (!sourceImageBase64 && isIndexedDbAvailable()) {
+      try {
+        const fromDb = await getImageFromDB(editSourceVisual.id);
+        if (fromDb && String(fromDb).trim()) {
+          sourceImageBase64 = String(fromDb).trim();
+          sourceImageBase64Available = true;
+        }
+      } catch {
+        sourceImageBase64Available = false;
+      }
+    }
+
+    let editRequestRecordId = null;
+    if (isTextMock || isImagePrecise) {
+      editRequestRecordId = newStableId();
+      appendEditRequest({
+        id: editRequestRecordId,
+        projectKey,
+        sourceVisualId: parentVisualIdForEdit,
+        sourceImageId: parentVisualIdForEdit,
+        sourcePromptText: basePrompt || "",
+        editInstruction: instruction,
+        editMode: uiModeRow.editMode,
+        status: "processing",
+        createdAt: new Date().toISOString(),
+        resultVisualId: null,
+      });
+    }
+
+    if (isImagePrecise && !sourceImageBase64) {
+      if (editRequestRecordId) patchEditRequest(editRequestRecordId, { status: "failed" });
+      setVisualEditIterationNotice(
+        "Не удалось загрузить исходное изображение для точной правки. Убедитесь, что вариант сохранён и IndexedDB доступна."
+      );
+      window.setTimeout(() => setVisualEditIterationNotice(""), 6400);
+      return;
+    }
+
+    setImageRequestKind(isImagePrecise ? "image_edit" : "text_edit");
     setIsImageRunning(true);
-    setImageError("");
+    if (isTextMock) {
+      setImageError("");
+    }
     setShowImagePromptDetails(false);
 
     try {
+      if (isImagePrecise) {
+        const response = await fetch("/api/image-edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectKey,
+            sourceVisualId: parentVisualIdForEdit,
+            sourceImageId: parentVisualIdForEdit,
+            sourceImageBase64,
+            editInstruction: instruction,
+            editMode: "image_to_image",
+          }),
+        });
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch {
+          payload = {};
+        }
+
+        const nextB64 =
+          payload.ok === true && typeof payload.imageBase64 === "string"
+            ? payload.imageBase64.trim()
+            : "";
+
+        const succeeded = response.ok && payload.ok === true && nextB64;
+
+        if (!succeeded) {
+          if (editRequestRecordId) patchEditRequest(editRequestRecordId, { status: "failed" });
+          let notice = "Не удалось выполнить точную правку. Попробуйте позже или используйте текстовую итерацию.";
+          const errTxt =
+            typeof payload.error === "string" && payload.error.trim() ? payload.error.trim() : "";
+          if (errTxt.includes("OPENAI_API_KEY")) {
+            notice =
+              "На сервере не настроен OPENAI_API_KEY. Добавьте ключ в окружение (например .env.local) и перезапустите приложение.";
+          } else if (errTxt.length > 0 && errTxt.length < 420) {
+            notice = errTxt.endsWith(".") ? errTxt : `${errTxt}.`;
+          }
+          setVisualEditIterationNotice(notice);
+          window.setTimeout(() => setVisualEditIterationNotice(""), 9000);
+          return;
+        }
+
+        setVisualEditIterationNotice("");
+
+        const alternateForStorageImg = inheritedAlternateKind ?? atmospherePicked;
+        const createdAtImg = new Date().toISOString();
+        const semanticBaseImg = normalizeSemanticDraft(editSourceVisual.semanticDraft);
+        const semanticDraftRawImg = createSemanticDraftFromEdit(instruction, semanticBaseImg);
+        const mergedCatsImg = extractPossibleProductCategories(semanticDraftRawImg);
+        const semanticDraftImg = normalizeSemanticDraft({
+          ...semanticDraftRawImg,
+          possibleCategories: [
+            ...new Set([...(semanticDraftRawImg.possibleCategories || []), ...mergedCatsImg]),
+          ].slice(0, 32),
+        });
+
+        const nextPromptUsedImg = `[${payload.model || "gpt-image-1"} image edit]\nRequested changes:\n${instruction}`;
+
+        const newItemImg = {
+          id: newStableId(),
+          imageBase64: nextB64,
+          promptUsed: nextPromptUsedImg,
+          promptText: basePrompt || interiorDescription.trim() || `[image_edit:${instruction.slice(0, 80)}]`,
+          promptVersionId: editSourceVisual.promptVersionId ?? null,
+          variationLabel: "ТОЧНАЯ ПРАВКА",
+          iterationLabel: "ТОЧНАЯ ПРАВКА",
+          iterationType: IT_IMAGE_EDIT,
+          editOfVisualId: parentVisualIdForEdit,
+          parentVisualId: parentVisualIdForEdit,
+          sourceVisualId: lineageSourceVisualId,
+          sourceImageId: parentVisualIdForEdit,
+          sourceImageBase64Available,
+          sourcePromptText: basePrompt || "",
+          editRequestId: editRequestRecordId,
+          editPrompt: instruction,
+          editInstruction: instruction,
+          createdAt: createdAtImg,
+          alternateKind: alternateForStorageImg,
+          title: inheritedTitle,
+          style: inheritedStyle,
+          mood: inheritedMood,
+          palette: inheritedPalette,
+          semanticDraft: semanticDraftImg,
+          projectKey,
+        };
+
+        setSessionVisualGallery((prev) => [...prev, newItemImg]);
+        setSelectedSessionVisualId(newItemImg.id);
+        setVisualEditInstruction("");
+
+        if (editRequestRecordId) {
+          patchEditRequest(editRequestRecordId, {
+            status: "done",
+            resultVisualId: newItemImg.id,
+          });
+        }
+
+        if (process.env.NODE_ENV === "development") {
+          console.log("[OSA][edit][i2i] created visual", {
+            id: newItemImg.id,
+            model: payload.model,
+            editRequestId: editRequestRecordId,
+          });
+        }
+
+        const paletteForPersistImg =
+          inheritedPalette.base || inheritedPalette.accent || inheritedPalette.contrast
+            ? inheritedPalette
+            : normalizePalette(resultData.palette);
+
+        const rawPersistImg = {
+          ...newItemImg,
+          title:
+            inheritedTitle || (typeof resultData.title === "string" ? resultData.title : ""),
+          style:
+            inheritedStyle || (typeof resultData.style === "string" ? resultData.style : ""),
+          mood: inheritedMood || (typeof resultData.mood === "string" ? resultData.mood : ""),
+          palette: paletteForPersistImg,
+          projectKey,
+          imageStored: true,
+        };
+        const persistItemImg = normalizeSavedVisual(rawPersistImg);
+        if (!persistItemImg) {
+          console.error("OSA: failed to normalize image-edit visual for storage");
+        } else if (!isIndexedDbAvailable()) {
+          setImageError(
+            "IndexedDB недоступна — визуал не будет сохранён после перезагрузки. Используйте браузер с поддержкой IndexedDB."
+          );
+        } else {
+          try {
+            await saveImageToDB(persistItemImg.id, nextB64);
+            setSavedVisuals((prev) => {
+              const next = [persistItemImg, ...prev.filter((x) => x.id !== persistItemImg.id)];
+              persistVisualHistoryRecords(next);
+              return next;
+            });
+          } catch (err) {
+            console.error(err);
+            setImageError(
+              "Не удалось сохранить изображение в IndexedDB. Визуал виден только до перезагрузки страницы."
+            );
+          }
+        }
+
+        window.setTimeout(() => setIsImageVisible(true), 0);
+        return;
+      }
+
       const response = await fetch("/api/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          resultData,
+          resultData: resultDataForApi,
           atmosphere: atmospherePicked,
           isAlternate: false,
         }),
@@ -3004,39 +3463,101 @@ export default function Home() {
         throw new Error("Сервер вернул пустое изображение.");
       }
 
+      const alternateForStorage = inheritedAlternateKind ?? atmospherePicked;
+      const createdAtIso = new Date().toISOString();
+      const semanticBase = normalizeSemanticDraft(editSourceVisual.semanticDraft);
+      const semanticDraftRaw = createSemanticDraftFromEdit(instruction, semanticBase);
+      const mergedCats = extractPossibleProductCategories(semanticDraftRaw);
+      const semanticDraft = normalizeSemanticDraft({
+        ...semanticDraftRaw,
+        possibleCategories: [
+          ...new Set([...(semanticDraftRaw.possibleCategories || []), ...mergedCats]),
+        ].slice(0, 32),
+      });
+
       const newItem = {
         id: newStableId(),
         imageBase64: nextB64,
         promptUsed: nextPromptUsed,
         promptText: basePrompt,
-        promptVersionId: selectedSessionVisual.promptVersionId ?? null,
+        promptVersionId: editSourceVisual.promptVersionId ?? null,
         variationLabel: "ПРАВКА",
-        editOfVisualId: selectedSessionVisual.id,
+        iterationLabel: "ПРАВКА",
+        iterationType: IT_TEXT_EDIT_MOCK,
+        editOfVisualId: parentVisualIdForEdit,
+        parentVisualId: parentVisualIdForEdit,
+        sourceVisualId: lineageSourceVisualId,
+        sourceImageId: parentVisualIdForEdit,
+        sourceImageBase64Available,
+        sourcePromptText: basePrompt,
+        editRequestId: editRequestRecordId,
+        editPrompt: instruction,
         editInstruction: instruction,
-        iterationType: "text_edit",
-        createdAt: new Date().toISOString(),
-        alternateKind: null,
+        createdAt: createdAtIso,
+        alternateKind: alternateForStorage,
+        title: inheritedTitle,
+        style: inheritedStyle,
+        mood: inheritedMood,
+        palette: inheritedPalette,
+        semanticDraft,
+        projectKey,
       };
 
       setSessionVisualGallery((prev) => [...prev, newItem]);
       setSelectedSessionVisualId(newItem.id);
       setVisualEditInstruction("");
-      if (process.env.NODE_ENV === "development") {
-        console.log("[OSA][dev] selectedSessionVisual after edit", newItem);
+
+      if (editRequestRecordId) {
+        patchEditRequest(editRequestRecordId, {
+          status: "done",
+          resultVisualId: newItem.id,
+        });
       }
 
-      let projectKey = resultData.projectKey;
-      if (!projectKey || !String(projectKey).trim()) {
-        projectKey = newStableId();
-        setResultData((prev) => (prev ? { ...prev, projectKey } : prev));
+      if (process.env.NODE_ENV === "development") {
+        console.log("[OSA][edit] source visual", {
+          id: editSourceVisual.id,
+          projectKey:
+            typeof editSourceVisual.projectKey === "string" ? editSourceVisual.projectKey : null,
+          parentVisualId:
+            typeof editSourceVisual.parentVisualId === "string"
+              ? editSourceVisual.parentVisualId
+              : null,
+          sourceVisualId:
+            typeof editSourceVisual.sourceVisualId === "string"
+              ? editSourceVisual.sourceVisualId
+              : null,
+          iterationType: editSourceVisual.iterationType || "",
+        });
+        console.log("[OSA][edit] created edit visual", {
+          id: newItem.id,
+          projectKey,
+          parentVisualId: newItem.parentVisualId,
+          sourceVisualId: newItem.sourceVisualId,
+          sourceImageId: newItem.sourceImageId,
+          sourceImageBase64Available: newItem.sourceImageBase64Available,
+          editRequestId: newItem.editRequestId,
+          iterationType: newItem.iterationType,
+          variationLabel: newItem.variationLabel,
+          editPrompt: newItem.editPrompt,
+          createdAt: newItem.createdAt,
+        });
+        console.log("[OSA][edit] selected visual updated", { selectedId: newItem.id });
       }
+
+      const paletteForPersist =
+        inheritedPalette.base || inheritedPalette.accent || inheritedPalette.contrast
+          ? inheritedPalette
+          : normalizePalette(resultData.palette);
 
       const rawPersist = {
         ...newItem,
-        title: typeof resultData.title === "string" ? resultData.title : "",
-        style: typeof resultData.style === "string" ? resultData.style : "",
-        mood: typeof resultData.mood === "string" ? resultData.mood : "",
-        palette: normalizePalette(resultData.palette),
+        title:
+          inheritedTitle || (typeof resultData.title === "string" ? resultData.title : ""),
+        style:
+          inheritedStyle || (typeof resultData.style === "string" ? resultData.style : ""),
+        mood: inheritedMood || (typeof resultData.mood === "string" ? resultData.mood : ""),
+        palette: paletteForPersist,
         projectKey,
         imageStored: true,
       };
@@ -3066,7 +3587,27 @@ export default function Home() {
       window.setTimeout(() => setIsImageVisible(true), 0);
     } catch (error) {
       console.error(error);
-      setImageError(error?.message || "Не удалось создать правку. Попробуйте еще раз.");
+      if (isImagePrecise) {
+        if (editRequestRecordId) patchEditRequest(editRequestRecordId, { status: "failed" });
+        setVisualEditIterationNotice(
+          "Не удалось выполнить точную правку. Проверьте соединение и попробуйте снова."
+        );
+        window.setTimeout(() => setVisualEditIterationNotice(""), 6400);
+      } else {
+        const msg =
+          typeof error?.message === "string" && error.message === "Этот режим будет подключён позже."
+            ? error.message
+            : error?.message || "Не удалось создать правку. Попробуйте еще раз.";
+        if (msg === "Этот режим будет подключён позже.") {
+          setVisualEditIterationNotice(msg);
+          window.setTimeout(() => setVisualEditIterationNotice(""), 3200);
+        } else {
+          setImageError(msg);
+        }
+        if (editRequestRecordId) {
+          patchEditRequest(editRequestRecordId, { status: "failed" });
+        }
+      }
     } finally {
       setIsImageRunning(false);
       setImageRequestKind(null);
@@ -3897,13 +4438,7 @@ export default function Home() {
                                 <div key={item.id} style={getSessionGalleryCardStyle(isSel)}>
                                   <div style={{ position: "relative", ...sessionGalleryThumbStyle }}>
                                     <span style={sessionGalleryVariantBadgeStyle}>
-                                      {item.iterationType === "text_edit"
-                                        ? "ПРАВКА"
-                                        : item.variationLabel
-                                          ? item.variationLabel
-                                          : item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]
-                                            ? ALTERNATE_KIND_LABEL_RU[item.alternateKind]
-                                            : "Основной"}
+                                      {visualIterationBadgeText(item)}
                                     </span>
                                     {item.imageBase64 && String(item.imageBase64).trim() ? (
                                       <img
@@ -3971,6 +4506,18 @@ export default function Home() {
                           </div>
                           <div
                             style={{
+                              fontSize: "12px",
+                              lineHeight: 1.4,
+                              marginBottom: "10px",
+                              color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+                            }}
+                          >
+                            {visualEditIterationMode === "precise_image"
+                              ? "Режим: точная правка изображения. После подключения image-edit API правка будет выполняться по исходному рендеру."
+                              : "Режим: текстовая итерация. Позже здесь можно будет править результат через исходное изображение."}
+                          </div>
+                          <div
+                            style={{
                               fontSize: "13px",
                               lineHeight: 1.45,
                               marginBottom: "10px",
@@ -3979,19 +4526,79 @@ export default function Home() {
                           >
                             Создать новую итерацию на основе текущего варианта
                           </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: "8px",
+                              marginBottom: "10px",
+                            }}
+                          >
+                            {EDIT_UI_MODES.map((mode) => {
+                              const active = visualEditIterationMode === mode.id;
+                              return (
+                                <button
+                                  key={mode.id}
+                                  type="button"
+                                  disabled={mode.disabled}
+                                  onClick={() => {
+                                    if (mode.disabled) return;
+                                    setVisualEditIterationMode(mode.id);
+                                  }}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    padding: "8px 12px",
+                                    borderRadius: "10px",
+                                    fontSize: "12px",
+                                    fontFamily: "inherit",
+                                    cursor: mode.disabled ? "not-allowed" : "pointer",
+                                    opacity: mode.disabled ? 0.52 : active ? 1 : 0.88,
+                                    border: isDark
+                                      ? active
+                                        ? "1px solid rgba(243,238,231,0.28)"
+                                        : "1px solid rgba(255,255,255,0.09)"
+                                      : active
+                                        ? "1px solid rgba(60,50,45,0.22)"
+                                        : "1px solid rgba(60,50,45,0.10)",
+                                    background: isDark
+                                      ? active
+                                        ? "rgba(255,255,255,0.08)"
+                                        : "rgba(0,0,0,0.12)"
+                                      : active
+                                        ? "rgba(255,255,255,0.85)"
+                                        : "rgba(255,255,255,0.4)",
+                                    color: isDark ? "#F3EEE7" : "#2B2B2B",
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  <span>{mode.label}</span>
+                                  {mode.soon ? (
+                                    <span style={{ opacity: 0.6, fontSize: "11px" }}>(скоро)</span>
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
                           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
                             <span style={{ opacity: 0.6, fontSize: "12px" }}>Текущий вариант:</span>
                             <span style={{ ...aiChipAnalyzeStyle, padding: "6px 10px", borderRadius: "999px" }}>
-                              {selectedSessionVisual.iterationType === "text_edit"
-                                ? "ПРАВКА"
-                                : selectedSessionVisual.variationLabel
-                                  ? selectedSessionVisual.variationLabel
-                                  : selectedSessionVisual.alternateKind &&
-                                      ALTERNATE_KIND_LABEL_RU[selectedSessionVisual.alternateKind]
-                                    ? ALTERNATE_KIND_LABEL_RU[selectedSessionVisual.alternateKind]
-                                    : "Основной"}
+                              {visualIterationBadgeText(selectedSessionVisual)}
                             </span>
                           </div>
+                          {visualEditIterationNotice ? (
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                marginBottom: "8px",
+                                lineHeight: 1.35,
+                                color: isDark ? "#E8C4B0" : "#7A5540",
+                              }}
+                            >
+                              {visualEditIterationNotice}
+                            </div>
+                          ) : null}
                           <textarea
                             value={visualEditInstruction}
                             onChange={(e) => setVisualEditInstruction(e.target.value)}
@@ -4024,7 +4631,10 @@ export default function Home() {
                               e.currentTarget.style.transform = "translateY(0px)";
                             }}
                           >
-                            {isImageRunning && imageRequestKind === "text_edit" ? "Создаем…" : "Создать правку"}
+                            {isImageRunning &&
+                            (imageRequestKind === "text_edit" || imageRequestKind === "image_edit")
+                              ? "Создаем…"
+                              : "Создать правку"}
                           </button>
                         </div>
                       ) : null}
@@ -4740,13 +5350,7 @@ export default function Home() {
                                 <div key={item.id} style={getSessionGalleryCardStyle(isSel)}>
                                   <div style={{ position: "relative", ...sessionGalleryThumbStyle }}>
                                     <span style={sessionGalleryVariantBadgeStyle}>
-                                      {item.iterationType === "text_edit"
-                                        ? "ПРАВКА"
-                                        : item.variationLabel
-                                          ? item.variationLabel
-                                          : item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]
-                                            ? ALTERNATE_KIND_LABEL_RU[item.alternateKind]
-                                            : "Основной"}
+                                      {visualIterationBadgeText(item)}
                                     </span>
                                     {item.imageBase64 && String(item.imageBase64).trim() ? (
                                       <img
@@ -4814,6 +5418,18 @@ export default function Home() {
                           </div>
                           <div
                             style={{
+                              fontSize: "12px",
+                              lineHeight: 1.4,
+                              marginBottom: "10px",
+                              color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+                            }}
+                          >
+                            {visualEditIterationMode === "precise_image"
+                              ? "Режим: точная правка изображения. После подключения image-edit API правка будет выполняться по исходному рендеру."
+                              : "Режим: текстовая итерация. Позже здесь можно будет править результат через исходное изображение."}
+                          </div>
+                          <div
+                            style={{
                               fontSize: "13px",
                               lineHeight: 1.45,
                               marginBottom: "10px",
@@ -4822,6 +5438,79 @@ export default function Home() {
                           >
                             Создать новую итерацию на основе выбранного варианта
                           </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: "8px",
+                              marginBottom: "10px",
+                            }}
+                          >
+                            {EDIT_UI_MODES.map((mode) => {
+                              const active = visualEditIterationMode === mode.id;
+                              return (
+                                <button
+                                  key={mode.id}
+                                  type="button"
+                                  disabled={mode.disabled}
+                                  onClick={() => {
+                                    if (mode.disabled) return;
+                                    setVisualEditIterationMode(mode.id);
+                                  }}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    padding: "8px 12px",
+                                    borderRadius: "10px",
+                                    fontSize: "12px",
+                                    fontFamily: "inherit",
+                                    cursor: mode.disabled ? "not-allowed" : "pointer",
+                                    opacity: mode.disabled ? 0.52 : active ? 1 : 0.88,
+                                    border: isDark
+                                      ? active
+                                        ? "1px solid rgba(243,238,231,0.28)"
+                                        : "1px solid rgba(255,255,255,0.09)"
+                                      : active
+                                        ? "1px solid rgba(60,50,45,0.22)"
+                                        : "1px solid rgba(60,50,45,0.10)",
+                                    background: isDark
+                                      ? active
+                                        ? "rgba(255,255,255,0.08)"
+                                        : "rgba(0,0,0,0.12)"
+                                      : active
+                                        ? "rgba(255,255,255,0.85)"
+                                        : "rgba(255,255,255,0.4)",
+                                    color: isDark ? "#F3EEE7" : "#2B2B2B",
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  <span>{mode.label}</span>
+                                  {mode.soon ? (
+                                    <span style={{ opacity: 0.6, fontSize: "11px" }}>(скоро)</span>
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                            <span style={{ opacity: 0.6, fontSize: "12px" }}>Текущий вариант:</span>
+                            <span style={{ ...aiChipAnalyzeStyle, padding: "6px 10px", borderRadius: "999px" }}>
+                              {visualIterationBadgeText(selectedSessionVisual)}
+                            </span>
+                          </div>
+                          {visualEditIterationNotice ? (
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                marginBottom: "8px",
+                                lineHeight: 1.35,
+                                color: isDark ? "#E8C4B0" : "#7A5540",
+                              }}
+                            >
+                              {visualEditIterationNotice}
+                            </div>
+                          ) : null}
                           <textarea
                             value={visualEditInstruction}
                             onChange={(e) => setVisualEditInstruction(e.target.value)}
@@ -4854,7 +5543,10 @@ export default function Home() {
                               e.currentTarget.style.transform = "translateY(0px)";
                             }}
                           >
-                            {isImageRunning && imageRequestKind === "text_edit" ? "Создаем…" : "Создать правку"}
+                            {isImageRunning &&
+                            (imageRequestKind === "text_edit" || imageRequestKind === "image_edit")
+                              ? "Создаем…"
+                              : "Создать правку"}
                           </button>
                         </div>
                       ) : null}
