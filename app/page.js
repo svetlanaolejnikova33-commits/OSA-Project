@@ -7,7 +7,13 @@ import {
   deleteImageFromDB,
   getAllImagesFromDB,
   isIndexedDbAvailable,
+  saveSemanticAnalysisToDB,
+  getSemanticAnalysesByProjectKey,
+  getLatestSemanticAnalysis,
+  getAllSemanticAnalysesFromDB,
 } from "./lib/imageStore";
+import { runMockSemanticAnalysis } from "./lib/semanticAnalysisService";
+import { SemanticAnalysisCards } from "./components/SemanticAnalysisCards";
 
 /** Atmosphere modes (image API + badges). English labels as design system. */
 const ATMOSPHERE_KEYS = [
@@ -275,35 +281,236 @@ function AtmosphereDropdown({ value, onChange, disabled, isDark }) {
 const OSA_VISUAL_HISTORY_KEY = "osa-visual-history-v1";
 const OSA_PROJECT_PROMPTS_KEY = "osa-project-prompts-v1";
 const OSA_ACTIVE_PROJECT_KEY = "osa-active-project-v1";
+const OSA_ACTIVE_PROMPT_VERSION_KEY = "osa-active-prompt-version-v1";
+const OSA_VISUAL_HISTORY_LEGACY_KEYS = [
+  "osa-visual-history",
+  "osa-visual-history-v0",
+  "osa-visual-history-v1",
+];
 
-function loadProjectPromptsMap() {
+function listOsaLocalStorageKeys() {
   try {
-    const raw = localStorage.getItem(OSA_PROJECT_PROMPTS_KEY);
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && typeof k === "string" && k.toLowerCase().startsWith("osa")) keys.push(k);
+    }
+    keys.sort();
+    return keys;
+  } catch {
+    return [];
+  }
+}
+
+function safeReadLocalStorageJsonArray(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickFirstNonEmptyVisualHistoryKey() {
+  // Prefer current key, but fallback to any legacy keys that contain an array payload.
+  const direct = safeReadLocalStorageJsonArray(OSA_VISUAL_HISTORY_KEY);
+  if (direct && direct.length) return OSA_VISUAL_HISTORY_KEY;
+  for (const k of OSA_VISUAL_HISTORY_LEGACY_KEYS) {
+    const arr = safeReadLocalStorageJsonArray(k);
+    if (arr && arr.length) return k;
+  }
+  // Last resort: scan any `osa-visual-history*` keys.
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (!k || typeof k !== "string") continue;
+      const low = k.toLowerCase();
+      if (!low.startsWith("osa-visual-history")) continue;
+      const arr = safeReadLocalStorageJsonArray(k);
+      if (arr && arr.length) return k;
+    }
+  } catch {
+    // ignore
+  }
+  return OSA_VISUAL_HISTORY_KEY;
+}
+
+function coercePromptVersionsMap(rawValue) {
+  // Storage format (v1): { [projectKey]: PromptVersion[] }
+  // Legacy format:      { [projectKey]: string }
+  const out = {};
+  if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return out;
+  for (const [k, v] of Object.entries(rawValue)) {
+    const projectKey = typeof k === "string" ? k.trim() : "";
+    if (!projectKey) continue;
+    if (Array.isArray(v)) {
+      const versions = v
+        .map((row) => {
+          if (!row || typeof row !== "object") return null;
+          const id = typeof row.id === "string" && row.id.trim() ? row.id.trim() : newStableId();
+          const text = typeof row.text === "string" ? row.text : "";
+          const title = typeof row.title === "string" ? row.title : "";
+          const createdAt =
+            typeof row.createdAt === "string" && row.createdAt.trim()
+              ? row.createdAt
+              : new Date().toISOString();
+          return { id, projectKey, text, title, createdAt };
+        })
+        .filter(Boolean);
+      out[projectKey] = versions;
+    } else if (typeof v === "string") {
+      // Legacy single prompt: expose as Version 1 without persisting automatically.
+      out[projectKey] = [
+        {
+          id: newStableId(),
+          projectKey,
+          text: v,
+          title: "Версия 1",
+          createdAt: new Date().toISOString(),
+          legacy: true,
+        },
+      ];
+    }
+  }
+  return out;
+}
+
+function normalizePromptText(text) {
+  // Requirements: trim + remove extra spaces at beginning/end (trim covers that).
+  return typeof text === "string" ? text.trim() : "";
+}
+
+function loadActivePromptVersionMap() {
+  try {
+    const raw = localStorage.getItem(OSA_ACTIVE_PROMPT_VERSION_KEY);
     if (!raw) return {};
-    const p = JSON.parse(raw);
-    return p && typeof p === "object" && !Array.isArray(p) ? p : {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
 }
 
-function getStoredProjectPrompt(projectKey) {
-  if (!projectKey || typeof projectKey !== "string") return "";
-  const map = loadProjectPromptsMap();
-  const t = map[projectKey.trim()];
-  return typeof t === "string" ? t : "";
+function getActivePromptVersionId(projectKey) {
+  if (!projectKey || typeof projectKey !== "string") return null;
+  const key = projectKey.trim();
+  if (!key) return null;
+  const map = loadActivePromptVersionMap();
+  const v = map[key];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-function saveStoredProjectPrompt(projectKey, text) {
-  if (!projectKey || typeof projectKey !== "string" || !projectKey.trim()) return;
+function setActivePromptVersionId(projectKey, versionId) {
+  if (!projectKey || typeof projectKey !== "string") return;
   const key = projectKey.trim();
-  const map = loadProjectPromptsMap();
-  map[key] = typeof text === "string" ? text : "";
-  try {
-    localStorage.setItem(OSA_PROJECT_PROMPTS_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error("OSA: failed to persist project prompt", e);
+  if (!key) return;
+  const map = loadActivePromptVersionMap();
+  if (versionId && typeof versionId === "string" && versionId.trim()) {
+    map[key] = versionId.trim();
+  } else {
+    delete map[key];
   }
+  try {
+    localStorage.setItem(OSA_ACTIVE_PROMPT_VERSION_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.warn("OSA: failed to persist active prompt version id", e);
+  }
+}
+
+function loadPromptVersionsMap() {
+  try {
+    const raw = localStorage.getItem(OSA_PROJECT_PROMPTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return coercePromptVersionsMap(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function getPromptVersionsForProject(projectKey) {
+  if (!projectKey || typeof projectKey !== "string") return [];
+  const map = loadPromptVersionsMap();
+  const key = projectKey.trim();
+  const rows = map[key];
+  const versions = Array.isArray(rows) ? rows.slice() : [];
+  versions.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return versions;
+}
+
+function getLatestPromptVersion(projectKey) {
+  const versions = getPromptVersionsForProject(projectKey);
+  return versions.length ? versions[versions.length - 1] : null;
+}
+
+function getStoredProjectPrompt(projectKey) {
+  const latest = getLatestPromptVersion(projectKey);
+  return latest && typeof latest.text === "string" ? latest.text : "";
+}
+
+function savePromptVersion(projectKey, text) {
+  if (!projectKey || typeof projectKey !== "string" || !projectKey.trim()) return null;
+  const key = projectKey.trim();
+  const safeText = normalizePromptText(text);
+  const current = loadPromptVersionsMap();
+  const versions = Array.isArray(current[key]) ? current[key].filter((v) => v && typeof v === "object") : [];
+  const nextIndex = versions.length + 1;
+  const version = {
+    id: newStableId(),
+    projectKey: key,
+    text: safeText,
+    title: `Версия ${nextIndex}`,
+    createdAt: new Date().toISOString(),
+  };
+  current[key] = [...versions, version];
+  try {
+    localStorage.setItem(OSA_PROJECT_PROMPTS_KEY, JSON.stringify(current));
+  } catch (e) {
+    console.error("OSA: failed to persist prompt versions", e);
+  }
+  return version;
+}
+
+function deletePromptVersion(projectKey, versionId) {
+  if (!projectKey || typeof projectKey !== "string" || !projectKey.trim()) {
+    return { ok: false, error: "missing_project_key" };
+  }
+  if (!versionId || typeof versionId !== "string") {
+    return { ok: false, error: "missing_version_id" };
+  }
+  const key = projectKey.trim();
+  const current = loadPromptVersionsMap();
+  const versions = Array.isArray(current[key]) ? current[key].filter((v) => v && typeof v === "object") : [];
+  if (versions.length <= 1) {
+    return { ok: false, error: "cannot_delete_last" };
+  }
+  const next = versions.filter((v) => String(v.id) !== versionId);
+  if (next.length === versions.length) {
+    return { ok: false, error: "not_found" };
+  }
+  current[key] = next;
+  try {
+    localStorage.setItem(OSA_PROJECT_PROMPTS_KEY, JSON.stringify(current));
+  } catch (e) {
+    console.error("OSA: failed to persist prompt versions (delete)", e);
+    return { ok: false, error: "persist_failed" };
+  }
+  return { ok: true, versions: next };
+}
+
+function resolvePromptVersionLink(projectKey, currentText, activePromptVersionId) {
+  const text = normalizePromptText(currentText);
+  const activeId = typeof activePromptVersionId === "string" && activePromptVersionId.trim()
+    ? activePromptVersionId.trim()
+    : null;
+  if (!activeId) return { promptVersionId: null, promptText: text };
+  const versions = getPromptVersionsForProject(projectKey);
+  const active = versions.find((v) => v && String(v.id) === String(activeId)) || null;
+  const activeText = active && typeof active.text === "string" ? normalizePromptText(active.text) : "";
+  const isSame = activeText && activeText === text;
+  return { promptVersionId: isSame ? activeId : null, promptText: text };
 }
 
 function persistActiveProjectKey(key) {
@@ -374,6 +581,12 @@ function normalizeSavedVisual(item) {
     id: String(item.id),
     imageBase64: legacyB64 ? item.imageBase64 : "",
     promptUsed: typeof item.promptUsed === "string" ? item.promptUsed : "",
+    promptText: typeof item.promptText === "string" ? item.promptText : "",
+    promptVersionId: typeof item.promptVersionId === "string" ? item.promptVersionId : null,
+    variationLabel: typeof item.variationLabel === "string" ? item.variationLabel : "",
+    editOfVisualId: typeof item.editOfVisualId === "string" ? item.editOfVisualId : null,
+    editInstruction: typeof item.editInstruction === "string" ? item.editInstruction : "",
+    iterationType: typeof item.iterationType === "string" ? item.iterationType : "",
     title: typeof item.title === "string" ? item.title : "",
     style: typeof item.style === "string" ? item.style : "",
     mood: typeof item.mood === "string" ? item.mood : "",
@@ -389,6 +602,12 @@ function visualToLocalStorageRecord(v) {
   return {
     id: String(v.id),
     promptUsed: typeof v.promptUsed === "string" ? v.promptUsed : "",
+    promptText: typeof v.promptText === "string" ? v.promptText : "",
+    promptVersionId: typeof v.promptVersionId === "string" ? v.promptVersionId : null,
+    variationLabel: typeof v.variationLabel === "string" ? v.variationLabel : "",
+    editOfVisualId: typeof v.editOfVisualId === "string" ? v.editOfVisualId : null,
+    editInstruction: typeof v.editInstruction === "string" ? v.editInstruction : "",
+    iterationType: typeof v.iterationType === "string" ? v.iterationType : "",
     title: typeof v.title === "string" ? v.title : "",
     style: typeof v.style === "string" ? v.style : "",
     mood: typeof v.mood === "string" ? v.mood : "",
@@ -860,14 +1079,28 @@ export default function Home() {
   const [analyzeImageResult, setAnalyzeImageResult] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isGenerateResultVisible, setIsGenerateResultVisible] = useState(false);
+  const [isAnalyzeResultVisible, setIsAnalyzeResultVisible] = useState(false);
 
   const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState("");
   const [selectedImageFileName, setSelectedImageFileName] = useState("");
+  const [selectedImageMimeType, setSelectedImageMimeType] = useState("");
+  const [selectedImageDimensions, setSelectedImageDimensions] = useState({ width: 0, height: 0 });
+  const [selectedImageBase64, setSelectedImageBase64] = useState("");
+  const [selectedImageId, setSelectedImageId] = useState("");
+  const [analyzeHistory, setAnalyzeHistory] = useState([]);
+  const [isAnalyzeDropActive, setIsAnalyzeDropActive] = useState(false);
   const [activeProjectKey, setActiveProjectKey] = useState(null);
   const [atmosphereChoice, setAtmosphereChoice] = useState("architectural_white");
   const [workspaceNarrow, setWorkspaceNarrow] = useState(false);
   const [lightAmbientRgb, setLightAmbientRgb] = useState(null);
   const prevActiveProjectKeyRef = useRef(null);
+  const analyzeFileInputRef = useRef(null);
+  const stablePreviewBase64Ref = useRef("");
+  const [promptVersions, setPromptVersions] = useState([]);
+  const [visualEditInstruction, setVisualEditInstruction] = useState("");
+  const [promptSaveNotice, setPromptSaveNotice] = useState("");
+  const [activePromptVersionId, setActivePromptVersionIdState] = useState(null);
+  const [promptHistoryOpen, setPromptHistoryOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 180);
@@ -889,20 +1122,30 @@ export default function Home() {
   }, [sessionVisualGallery, selectedSessionVisualId]);
 
   const previewImageBase64 = selectedSessionVisual?.imageBase64 ?? "";
+  const stablePreviewImageBase64 =
+    previewImageBase64 && String(previewImageBase64).trim()
+      ? previewImageBase64
+      : (stablePreviewBase64Ref.current || "");
 
   useEffect(() => {
-    if (isDark || !previewImageBase64) {
+    if (previewImageBase64 && String(previewImageBase64).trim()) {
+      stablePreviewBase64Ref.current = previewImageBase64;
+    }
+  }, [previewImageBase64]);
+
+  useEffect(() => {
+    if (isDark || !stablePreviewImageBase64) {
       setLightAmbientRgb(null);
       return;
     }
     let cancelled = false;
-    sampleAmbientRgbFromBase64(previewImageBase64, (rgb) => {
+    sampleAmbientRgbFromBase64(stablePreviewImageBase64, (rgb) => {
       if (!cancelled) setLightAmbientRgb(rgb);
     });
     return () => {
       cancelled = true;
     };
-  }, [isDark, previewImageBase64]);
+  }, [isDark, stablePreviewImageBase64]);
 
   const lightAmbientHeroOverlay = useMemo(() => {
     if (isDark || !lightAmbientRgb) return "";
@@ -966,6 +1209,24 @@ export default function Home() {
     };
   }, [activeProjectKey, resultData, projectList]);
 
+  const activePromptVersion = useMemo(() => {
+    if (!activeProjectKey || !activePromptVersionId) return null;
+    const versions = getPromptVersionsForProject(activeProjectKey);
+    return versions.find((v) => v && String(v.id) === String(activePromptVersionId)) || null;
+  }, [activeProjectKey, activePromptVersionId, promptVersions.length]);
+
+  const promptDirty = useMemo(() => {
+    if (!activeProjectKey) return false;
+    const current = normalizePromptText(interiorDescription);
+    const activeText = activePromptVersion ? normalizePromptText(activePromptVersion.text) : "";
+    if (activeText) return current !== activeText;
+    // If no active version selected, compare against latest saved version (if any).
+    const latest = getLatestPromptVersion(activeProjectKey);
+    const latestText = latest ? normalizePromptText(latest.text) : "";
+    if (!latestText) return Boolean(current);
+    return current !== latestText;
+  }, [activeProjectKey, interiorDescription, activePromptVersion, promptVersions.length]);
+
   const workspaceProjectPalette = useMemo(() => {
     if (!activeProjectKey) return null;
     const family = inferProjectPaletteFamily(
@@ -982,14 +1243,109 @@ export default function Home() {
     return () => URL.revokeObjectURL(selectedImagePreviewUrl);
   }, [selectedImagePreviewUrl]);
 
+  const restoreSemanticAnalysisFromRecord = async (record) => {
+    if (!record) return;
+    const mimeType = typeof record.mimeType === "string" ? record.mimeType : "";
+    const imageId = typeof record.imageId === "string" ? record.imageId : "";
+    const fileName = typeof record.fileName === "string" ? record.fileName : "";
+    const width = Number.isFinite(record.width) ? record.width : 0;
+    const height = Number.isFinite(record.height) ? record.height : 0;
+    setSelectedImageFileName(fileName);
+    setSelectedImageMimeType(mimeType);
+    setSelectedImageDimensions({ width, height });
+    setSelectedImageId(imageId);
+    setAnalyzeImageResult(record.result || null);
+    setIsAnalyzeResultVisible(false);
+    window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+
+    if (imageId && isIndexedDbAvailable()) {
+      try {
+        const b64 = (await getImageFromDB(imageId)) || "";
+        setSelectedImageBase64(b64);
+        if (b64 && mimeType) {
+          setSelectedImagePreviewUrl(`data:${mimeType};base64,${b64}`);
+        }
+      } catch (e) {
+        console.warn("OSA: failed to restore analysis image:", e);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!activeProjectKey) return;
+    if (!isIndexedDbAvailable()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getSemanticAnalysesByProjectKey(activeProjectKey, 10);
+        if (cancelled) return;
+        setAnalyzeHistory(rows);
+        const latest = rows && rows.length ? rows[0] : await getLatestSemanticAnalysis(activeProjectKey);
+        if (!latest || cancelled) return;
+        await restoreSemanticAnalysisFromRecord(latest);
+      } catch (e) {
+        console.warn("OSA: failed to hydrate semantic analysis history:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectKey]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    try {
+      console.log("[OSA][dev] localStorage osa* keys", listOsaLocalStorageKeys());
+      const active = localStorage.getItem(OSA_ACTIVE_PROJECT_KEY);
+      console.log("[OSA][dev] active project key", {
+        storageKey: OSA_ACTIVE_PROJECT_KEY,
+        value: active && String(active).trim() ? String(active).trim() : null,
+      });
+    } catch (e) {
+      console.warn("[OSA][dev] localStorage read failed:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    // Diagnostics for “Правка выбранного визуала” visibility.
+    const visible = Boolean(selectedSessionVisual && mode === "generate" && resultData);
+    console.log("[OSA][dev] edit visual block visible:", visible);
+    console.log("[OSA][dev] selectedSessionVisual id:", selectedSessionVisual?.id || null);
+  }, [selectedSessionVisual?.id, mode, resultData]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const raw = localStorage.getItem(OSA_VISUAL_HISTORY_KEY);
+        const chosenHistoryKey = pickFirstNonEmptyVisualHistoryKey();
+        const raw = localStorage.getItem(chosenHistoryKey);
         if (!raw) {
           if (process.env.NODE_ENV === "development") {
-            console.log("[OSA] visual history: empty localStorage");
+            console.log("[OSA] visual history: empty localStorage", {
+              expectedKey: OSA_VISUAL_HISTORY_KEY,
+              chosenHistoryKey,
+              osaKeys: listOsaLocalStorageKeys(),
+            });
+          }
+          if (process.env.NODE_ENV === "development" && isIndexedDbAvailable()) {
+            try {
+              const [images, analyses] = await Promise.all([
+                getAllImagesFromDB().catch(() => []),
+                getAllSemanticAnalysesFromDB().catch(() => []),
+              ]);
+              const visualCount = Array.isArray(images) ? images.length : 0;
+              const analysisCount = Array.isArray(analyses) ? analyses.length : 0;
+              const orphanImagesCount = visualCount; // no metadata → everything is orphan by definition
+              console.log("[OSA][dev] indexedDB visualImages count", visualCount);
+              console.log("[OSA][dev] indexedDB semanticAnalyses count", analysisCount);
+              console.log("[OSA][dev] orphan images count", orphanImagesCount);
+              if (orphanImagesCount > 0) {
+                console.warn("Найдены изображения без metadata");
+              }
+            } catch (e) {
+              console.warn("[OSA][dev] indexedDB counts failed:", e);
+            }
           }
           return;
         }
@@ -997,6 +1353,26 @@ export default function Home() {
         if (!Array.isArray(parsed)) {
           console.error("OSA visual history: expected array in localStorage");
           return;
+        }
+
+        // If user has data under a legacy key, copy it into the current key (do NOT delete legacy).
+        if (chosenHistoryKey !== OSA_VISUAL_HISTORY_KEY) {
+          try {
+            const currentArr = safeReadLocalStorageJsonArray(OSA_VISUAL_HISTORY_KEY) || [];
+            const merged = [...currentArr, ...parsed];
+            localStorage.setItem(OSA_VISUAL_HISTORY_KEY, JSON.stringify(merged));
+            if (process.env.NODE_ENV === "development") {
+              console.log("[OSA] visual history migrated (non-destructive)", {
+                fromKey: chosenHistoryKey,
+                toKey: OSA_VISUAL_HISTORY_KEY,
+                legacyCount: parsed.length,
+                existingCount: currentArr.length,
+                mergedCount: merged.length,
+              });
+            }
+          } catch (e) {
+            console.warn("[OSA] visual history migration copy failed:", e);
+          }
         }
 
         let migrated = false;
@@ -1053,18 +1429,44 @@ export default function Home() {
 
         if (process.env.NODE_ENV === "development") {
           let idbImages = 0;
+          let idbAnalyses = 0;
+          let orphanImages = 0;
           try {
             if (isIndexedDbAvailable()) {
               const all = await getAllImagesFromDB();
               idbImages = all.length;
+              const metaIds = new Set(hydrated.map((v) => String(v.id)));
+              orphanImages = all.reduce((acc, row) => {
+                const id = row && row.id != null ? String(row.id) : "";
+                if (!id) return acc;
+                return metaIds.has(id) ? acc : acc + 1;
+              }, 0);
             }
           } catch (e) {
             console.warn("[OSA] getAllImagesFromDB:", e);
           }
+          try {
+            if (isIndexedDbAvailable()) {
+              const allA = await getAllSemanticAnalysesFromDB();
+              idbAnalyses = allA.length;
+            }
+          } catch (e) {
+            console.warn("[OSA] getAllSemanticAnalysesFromDB:", e);
+          }
+          console.log("[OSA][dev] indexedDB visualImages count", idbImages);
+          console.log("[OSA][dev] indexedDB semanticAnalyses count", idbAnalyses);
+          console.log("[OSA][dev] orphan images count", orphanImages);
+          if (orphanImages > 0) {
+            console.warn("Найдены изображения без metadata");
+          }
           const projects = buildProjectListFromVisuals(hydrated);
           console.log("[OSA] visual history loaded", {
+            chosenHistoryKey,
+            osaKeys: listOsaLocalStorageKeys(),
             metadataRecords: hydrated.length,
             idbImages,
+            idbAnalyses,
+            orphanImages,
             projects: projects.length,
           });
         }
@@ -1105,6 +1507,18 @@ export default function Home() {
   }, [activeProjectKey]);
 
   useEffect(() => {
+    if (!activeProjectKey) {
+      setPromptVersions([]);
+      setActivePromptVersionIdState(null);
+      setPromptHistoryOpen(false);
+      return;
+    }
+    setPromptVersions(getPromptVersionsForProject(activeProjectKey).slice().reverse());
+    setActivePromptVersionIdState(getActivePromptVersionId(activeProjectKey));
+    setPromptHistoryOpen(false);
+  }, [activeProjectKey]);
+
+  useEffect(() => {
     if (!savedVisuals.length) return;
     try {
       const raw = localStorage.getItem(OSA_ACTIVE_PROJECT_KEY);
@@ -1128,6 +1542,12 @@ export default function Home() {
       id: item.id,
       imageBase64: item.imageBase64,
       promptUsed: item.promptUsed,
+      promptText: item.promptText || "",
+      promptVersionId: item.promptVersionId ?? null,
+      variationLabel: item.variationLabel || "",
+      editOfVisualId: item.editOfVisualId ?? null,
+      editInstruction: item.editInstruction || "",
+      iterationType: item.iterationType || "",
       createdAt: item.createdAt,
       alternateKind: item.alternateKind ?? null,
     }));
@@ -1158,8 +1578,14 @@ export default function Home() {
     });
     const L = proj.latest;
     const brief = extractUserBriefFromPromptUsed(L.promptUsed);
+    const activeId = getActivePromptVersionId(activeProjectKey);
+    const versionsAsc = getPromptVersionsForProject(activeProjectKey);
+    const activeV = activeId ? versionsAsc.find((v) => v && String(v.id) === String(activeId)) : null;
     const savedPrompt = getStoredProjectPrompt(activeProjectKey);
     setInteriorDescription(() => {
+      if (activeV && typeof activeV.text === "string" && normalizePromptText(activeV.text)) {
+        return activeV.text;
+      }
       if (savedPrompt && savedPrompt.trim()) return savedPrompt;
       if (brief) return brief;
       return `Концепция «${proj.title}»`;
@@ -2412,6 +2838,11 @@ export default function Home() {
     setShowImagePromptDetails(false);
 
     try {
+      const promptLink = resolvePromptVersionLink(
+        activeProjectKey || resultData?.projectKey || "",
+        prompt,
+        activePromptVersionId
+      );
       const response = await fetch("/api/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2438,6 +2869,15 @@ export default function Home() {
         id: newStableId(),
         imageBase64: nextB64,
         promptUsed: nextPromptUsed,
+        promptText: promptLink.promptText,
+        promptVersionId: promptLink.promptVersionId,
+        variationLabel:
+          atmospherePicked && ALTERNATE_KIND_LABEL_RU[atmospherePicked]
+            ? ALTERNATE_KIND_LABEL_RU[atmospherePicked]
+            : "",
+        editOfVisualId: null,
+        editInstruction: "",
+        iterationType: "",
         createdAt: new Date().toISOString(),
         alternateKind: atmospherePicked,
       };
@@ -2472,7 +2912,6 @@ export default function Home() {
         } else {
           try {
             await saveImageToDB(persistItem.id, nextB64);
-            saveStoredProjectPrompt(projectKey, prompt);
             setSavedVisuals((prev) => {
               const next = [persistItem, ...prev.filter((x) => x.id !== persistItem.id)];
               persistVisualHistoryRecords(next);
@@ -2491,6 +2930,143 @@ export default function Home() {
     } catch (error) {
       console.error(error);
       setImageError(error?.message || "Не удалось получить визуал. Попробуйте еще раз.");
+    } finally {
+      setIsImageRunning(false);
+      setImageRequestKind(null);
+    }
+  };
+
+  const handleCreateTextEditIteration = async () => {
+    if (isImageRunning) return;
+    if (!resultData) return;
+    if (!selectedSessionVisual) return;
+    const instruction = String(visualEditInstruction || "").trim();
+    if (!instruction) return;
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[OSA][dev] selectedSessionVisual before edit", selectedSessionVisual);
+      console.log("[OSA][dev] preview image source", {
+        selectedSessionVisualId,
+        previewLen: (previewImageBase64 || "").length,
+        stablePreviewLen: (stablePreviewImageBase64 || "").length,
+        isImageRunning,
+        imageRequestKind,
+      });
+    }
+
+    const basePrompt =
+      (selectedSessionVisual.promptText && String(selectedSessionVisual.promptText).trim()) ||
+      (selectedSessionVisual.promptUsed && String(selectedSessionVisual.promptUsed).trim()) ||
+      interiorDescription.trim();
+    if (!basePrompt) return;
+
+    const prompt = [
+      "Create a new iteration based on the previous interior concept.",
+      "Keep the overall composition and room logic unless the user asks otherwise.",
+      `Apply these changes: ${instruction}.`,
+      "Avoid changing unrelated elements.",
+      "Maintain photorealistic interior render quality.",
+      "No text, no watermark, no logos.",
+      "",
+      "Previous concept:",
+      basePrompt,
+    ].join("\n");
+
+    const atmospherePicked = ATMOSPHERE_KEYS.includes(atmosphereChoice)
+      ? atmosphereChoice
+      : "architectural_white";
+
+    setImageRequestKind("text_edit");
+    setIsImageRunning(true);
+    setImageError("");
+    setShowImagePromptDetails(false);
+
+    try {
+      const response = await fetch("/api/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          resultData,
+          atmosphere: atmospherePicked,
+          isAlternate: false,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || "Не удалось создать правку.");
+      }
+
+      const nextB64 = payload?.imageBase64 || "";
+      const nextPromptUsed = payload?.promptUsed || "";
+      if (!nextB64 || !nextPromptUsed) {
+        throw new Error("Сервер вернул пустое изображение.");
+      }
+
+      const newItem = {
+        id: newStableId(),
+        imageBase64: nextB64,
+        promptUsed: nextPromptUsed,
+        promptText: basePrompt,
+        promptVersionId: selectedSessionVisual.promptVersionId ?? null,
+        variationLabel: "ПРАВКА",
+        editOfVisualId: selectedSessionVisual.id,
+        editInstruction: instruction,
+        iterationType: "text_edit",
+        createdAt: new Date().toISOString(),
+        alternateKind: null,
+      };
+
+      setSessionVisualGallery((prev) => [...prev, newItem]);
+      setSelectedSessionVisualId(newItem.id);
+      setVisualEditInstruction("");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[OSA][dev] selectedSessionVisual after edit", newItem);
+      }
+
+      let projectKey = resultData.projectKey;
+      if (!projectKey || !String(projectKey).trim()) {
+        projectKey = newStableId();
+        setResultData((prev) => (prev ? { ...prev, projectKey } : prev));
+      }
+
+      const rawPersist = {
+        ...newItem,
+        title: typeof resultData.title === "string" ? resultData.title : "",
+        style: typeof resultData.style === "string" ? resultData.style : "",
+        mood: typeof resultData.mood === "string" ? resultData.mood : "",
+        palette: normalizePalette(resultData.palette),
+        projectKey,
+        imageStored: true,
+      };
+      const persistItem = normalizeSavedVisual(rawPersist);
+      if (!persistItem) {
+        console.error("OSA: failed to normalize edited visual for storage");
+      } else if (!isIndexedDbAvailable()) {
+        setImageError(
+          "IndexedDB недоступна — визуал не будет сохранён после перезагрузки. Используйте браузер с поддержкой IndexedDB."
+        );
+      } else {
+        try {
+          await saveImageToDB(persistItem.id, nextB64);
+          setSavedVisuals((prev) => {
+            const next = [persistItem, ...prev.filter((x) => x.id !== persistItem.id)];
+            persistVisualHistoryRecords(next);
+            return next;
+          });
+        } catch (err) {
+          console.error(err);
+          setImageError(
+            "Не удалось сохранить изображение в IndexedDB. Визуал виден только до перезагрузки страницы."
+          );
+        }
+      }
+
+      window.setTimeout(() => setIsImageVisible(true), 0);
+    } catch (error) {
+      console.error(error);
+      setImageError(error?.message || "Не удалось создать правку. Попробуйте еще раз.");
     } finally {
       setIsImageRunning(false);
       setImageRequestKind(null);
@@ -2552,59 +3128,181 @@ export default function Home() {
     });
   };
 
-  const handleSaveProjectPromptText = () => {
+  const handleSavePromptVersion = () => {
     if (!activeProjectKey) return;
-    saveStoredProjectPrompt(activeProjectKey, interiorDescription);
+    const currentText = normalizePromptText(interiorDescription);
+    const latest = getLatestPromptVersion(activeProjectKey);
+    const latestText = latest ? normalizePromptText(latest.text) : "";
+    if (!currentText) return;
+    if (latestText && currentText === latestText) {
+      setPromptSaveNotice("Изменений нет — версия уже сохранена.");
+      window.setTimeout(() => setPromptSaveNotice(""), 1800);
+      setPromptVersions(getPromptVersionsForProject(activeProjectKey).slice().reverse());
+      return null;
+    }
+    const v = savePromptVersion(activeProjectKey, currentText);
+    setPromptSaveNotice("Сохранено");
+    window.setTimeout(() => setPromptSaveNotice(""), 1500);
+    setPromptVersions(getPromptVersionsForProject(activeProjectKey).slice().reverse());
+    return v;
+  };
+
+  const handleDeletePromptVersion = (versionId) => {
+    if (!activeProjectKey) return;
+    const versionsAsc = getPromptVersionsForProject(activeProjectKey);
+    if (versionsAsc.length <= 1) {
+      setPromptSaveNotice("Нельзя удалить единственную версию промпта.");
+      window.setTimeout(() => setPromptSaveNotice(""), 2000);
+      return;
+    }
+    const deleting = versionsAsc.find((v) => v && String(v.id) === String(versionId));
+    const res = deletePromptVersion(activeProjectKey, String(versionId));
+    if (!res.ok) {
+      if (res.error === "cannot_delete_last") {
+        setPromptSaveNotice("Нельзя удалить единственную версию промпта.");
+        window.setTimeout(() => setPromptSaveNotice(""), 2000);
+      }
+      setPromptVersions(getPromptVersionsForProject(activeProjectKey).slice().reverse());
+      return;
+    }
+    const nextAsc = getPromptVersionsForProject(activeProjectKey);
+    setPromptVersions(nextAsc.slice().reverse());
+
+    const current = normalizePromptText(interiorDescription);
+    const deletingText = deleting ? normalizePromptText(deleting.text) : "";
+    if (deletingText && current === deletingText) {
+      const latestNext = nextAsc.length ? nextAsc[nextAsc.length - 1] : null;
+      setInteriorDescription(latestNext?.text || "");
+    }
+  };
+
+  const handleMakePromptVersionCurrent = (version) => {
+    if (!activeProjectKey || !version) return;
+    setInteriorDescription(version.text || "");
+    setActivePromptVersionIdState(version.id);
+    setActivePromptVersionId(activeProjectKey, version.id);
+    setPromptSaveNotice("Версия промпта активна");
+    window.setTimeout(() => setPromptSaveNotice(""), 1500);
+    setPromptHistoryOpen(false);
   };
 
   const handleImageFileChange = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
 
-    const url = URL.createObjectURL(file);
-    setSelectedImageFileName(file.name);
-    setSelectedImagePreviewUrl(url);
-    setAnalyzeImageResult(null);
+    ingestAnalyzeImageFile(file);
+    try {
+      e.target.value = "";
+    } catch (err) {
+      // ignore
+    }
   };
 
-  const handleAnalyzeImage = () => {
+  async function ingestAnalyzeImageFile(file) {
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      window.alert("Поддерживаются только JPG / PNG / WebP.");
+      return;
+    }
+
+    const fileName = file.name || "image";
+    const mimeType = file.type || "image/png";
+    const url = URL.createObjectURL(file);
+
+    setSelectedImageFileName(fileName);
+    setSelectedImageMimeType(mimeType);
+    setSelectedImagePreviewUrl(url);
+    setAnalyzeImageResult(null);
+    setIsAnalyzeResultVisible(false);
+    setSelectedImageBase64("");
+    setSelectedImageId("");
+    setSelectedImageDimensions({ width: 0, height: 0 });
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error || new Error("FileReader error"));
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.readAsDataURL(file);
+    });
+
+    const rawB64 = String(dataUrl).includes(",") ? String(dataUrl).split(",").pop() : "";
+    setSelectedImageBase64(rawB64 || "");
+
+    const dims = await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || 0, height: img.naturalHeight || 0 });
+      img.onerror = () => resolve({ width: 0, height: 0 });
+      img.src = url;
+    });
+    setSelectedImageDimensions(dims);
+  }
+
+  const handleAnalyzeImage = async () => {
     if (isRunning) return;
-    if (!selectedImagePreviewUrl) return;
+    if (!selectedImagePreviewUrl || !selectedImageFileName) return;
+
+    let projectKey = activeProjectKey;
+    if (!projectKey) {
+      projectKey = newStableId();
+      persistActiveProjectKey(projectKey);
+      setActiveProjectKey(projectKey);
+    }
+
+    const width = selectedImageDimensions?.width || 0;
+    const height = selectedImageDimensions?.height || 0;
 
     setIsRunning(true);
     setAnalyzeImageResult(null);
+    setIsAnalyzeResultVisible(false);
 
-    window.setTimeout(() => {
-      setAnalyzeImageResult({
-        recognized: [
-          "Стилистика: теплый современный интерьер с мягкими переходами и акцентными плоскостями",
-          "Материалы: дерево/орех + матовое стекло + текстильные фактуры",
-          "Свет: теплые сценарии подсветки с фокусом на зонирование",
-          "Композиция: взгляд ведет от входной группы к центральной зоне",
-        ],
-        style: "Теплый modern / soft-minimal с премиальными тактильными материалами",
-        strengths: [
-          "Единая палитра: графит + орех создают «дорогую» основу",
-          "Зонирование читается без визуального шума",
-          "Тактильность материалов поддерживает комфорт и глубину",
-        ],
-        improvements: [
-          "Уточнить сценарии света (добавить акцентный слой для деталей/декора)",
-          "Выровнять визуальные акценты по ритму (вертикали/горизонтали)",
-          "Проверить, как изменится восприятие при другой текстуре/матовости стен",
-        ],
-        categoriesForSelection: [
-          "Освещение",
-          "Отделка стен",
-          "Текстиль",
-          "Мебель и фасады",
-          "Стекло/перегородки",
-          "Декор и искусство",
-        ],
-        debugNote: `[Дальше будет подключен AI API] Файл: ${selectedImageFileName || "выбранное изображение"}`,
+    try {
+      const createdAt = new Date().toISOString();
+      const analysisId = newStableId();
+      const imageId = `analysis:${projectKey}:${analysisId}`;
+      setSelectedImageId(imageId);
+
+      // Mock latency for cinematic feel
+      await new Promise((r) => window.setTimeout(r, 650 + Math.floor(Math.random() * 450)));
+
+      const mood = activeProjectMeta?.mood ?? "";
+      const result = runMockSemanticAnalysis({
+        fileName: selectedImageFileName,
+        width,
+        height,
+        mood,
+        projectKey,
+        paletteFamily: workspaceProjectPalette?.family ?? "",
       });
+
+      setAnalyzeImageResult(result);
+      window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+
+      if (isIndexedDbAvailable()) {
+        if (selectedImageBase64) {
+          await saveImageToDB(imageId, selectedImageBase64);
+        }
+        const record = {
+          id: `${projectKey}::${analysisId}`,
+          projectKey,
+          createdAt,
+          imageId,
+          fileName: selectedImageFileName || "",
+          mimeType: selectedImageMimeType || "image/png",
+          width,
+          height,
+          result,
+        };
+        await saveSemanticAnalysisToDB(record);
+        const rows = await getSemanticAnalysesByProjectKey(projectKey, 10);
+        setAnalyzeHistory(rows);
+      }
+    } catch (e) {
+      console.error(e);
+      window.alert("Не удалось выполнить анализ. Попробуйте ещё раз.");
+    } finally {
       setIsRunning(false);
-    }, 650);
+    }
   };
 
   const sessionContextAligned = Boolean(
@@ -3155,11 +3853,11 @@ export default function Home() {
                     <div style={imageInnerStyle}>
                       {imageError ? (
                         <div style={aiEmptyTextStyle}>{imageError}</div>
-                      ) : previewImageBase64 && String(previewImageBase64).trim() ? (
+                      ) : stablePreviewImageBase64 && String(stablePreviewImageBase64).trim() ? (
                         <>
                           <div style={{ ...imageFrameStyle, ...generateRevealStyle(isImageVisible) }}>
                             <img
-                              src={`data:image/png;base64,${previewImageBase64}`}
+                              src={`data:image/png;base64,${stablePreviewImageBase64}`}
                               alt="Сгенерированный визуал интерьера"
                               style={{ width: "100%", height: "auto", display: "block" }}
                             />
@@ -3198,11 +3896,15 @@ export default function Home() {
                               return (
                                 <div key={item.id} style={getSessionGalleryCardStyle(isSel)}>
                                   <div style={{ position: "relative", ...sessionGalleryThumbStyle }}>
-                                    {item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind] ? (
-                                      <span style={sessionGalleryVariantBadgeStyle}>
-                                        {ALTERNATE_KIND_LABEL_RU[item.alternateKind]}
-                                      </span>
-                                    ) : null}
+                                    <span style={sessionGalleryVariantBadgeStyle}>
+                                      {item.iterationType === "text_edit"
+                                        ? "ПРАВКА"
+                                        : item.variationLabel
+                                          ? item.variationLabel
+                                          : item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]
+                                            ? ALTERNATE_KIND_LABEL_RU[item.alternateKind]
+                                            : "Основной"}
+                                    </span>
                                     {item.imageBase64 && String(item.imageBase64).trim() ? (
                                       <img
                                         src={`data:image/png;base64,${item.imageBase64}`}
@@ -3247,6 +3949,85 @@ export default function Home() {
                           </div>
                         </div>
                       ) : null}
+
+                      {selectedSessionVisual ? (
+                        <div
+                          style={{
+                            marginTop: "18px",
+                            padding: "14px 14px",
+                            borderRadius: "14px",
+                            textAlign: "left",
+                            background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.45)",
+                            border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+                            boxShadow: isDark
+                              ? "none"
+                              : "0 4px 14px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.48)",
+                            backdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+                            WebkitBackdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+                          }}
+                        >
+                          <div style={{ ...aiFieldLabelStyle, marginBottom: "6px" }}>
+                            Правка выбранного визуала
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              lineHeight: 1.45,
+                              marginBottom: "10px",
+                              color: isDark ? "rgba(243,238,231,0.70)" : "rgba(110,106,102,0.88)",
+                            }}
+                          >
+                            Создать новую итерацию на основе текущего варианта
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                            <span style={{ opacity: 0.6, fontSize: "12px" }}>Текущий вариант:</span>
+                            <span style={{ ...aiChipAnalyzeStyle, padding: "6px 10px", borderRadius: "999px" }}>
+                              {selectedSessionVisual.iterationType === "text_edit"
+                                ? "ПРАВКА"
+                                : selectedSessionVisual.variationLabel
+                                  ? selectedSessionVisual.variationLabel
+                                  : selectedSessionVisual.alternateKind &&
+                                      ALTERNATE_KIND_LABEL_RU[selectedSessionVisual.alternateKind]
+                                    ? ALTERNATE_KIND_LABEL_RU[selectedSessionVisual.alternateKind]
+                                    : "Основной"}
+                            </span>
+                          </div>
+                          <textarea
+                            value={visualEditInstruction}
+                            onChange={(e) => setVisualEditInstruction(e.target.value)}
+                            placeholder="Например: убрать жёлтый оттенок, заменить кресло на более графичное, добавить белые фасады, сохранить композицию..."
+                            style={{
+                              ...textareaStyle,
+                              minHeight: "74px",
+                              marginBottom: "10px",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            style={{
+                              ...primaryButton,
+                              margin: 0,
+                              padding: "12px 18px",
+                              fontSize: "14px",
+                              borderRadius: "12px",
+                              boxSizing: "border-box",
+                              opacity: isImageRunning ? 0.65 : 1,
+                            }}
+                            disabled={isImageRunning || !String(visualEditInstruction || "").trim()}
+                            onClick={handleCreateTextEditIteration}
+                            onMouseEnter={(e) => {
+                              if (isImageRunning) return;
+                              e.currentTarget.style.transform = "translateY(-2px)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (isImageRunning) return;
+                              e.currentTarget.style.transform = "translateY(0px)";
+                            }}
+                          >
+                            {isImageRunning && imageRequestKind === "text_edit" ? "Создаем…" : "Создать правку"}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </>
@@ -3254,26 +4035,112 @@ export default function Home() {
             </>
           ) : (
             <>
-              <label style={uploadZoneStyle}>
+              <div
+                style={{
+                  ...uploadZoneStyle,
+                  border: isAnalyzeDropActive
+                    ? isDark
+                      ? "1px dashed rgba(183,157,138,0.55)"
+                      : "1px dashed rgba(183,157,138,0.60)"
+                    : uploadZoneStyle.border,
+                  background: isAnalyzeDropActive
+                    ? isDark
+                      ? "rgba(183,157,138,0.10)"
+                      : "rgba(255,255,255,0.62)"
+                    : uploadZoneStyle.background,
+                  boxShadow: isAnalyzeDropActive
+                    ? isDark
+                      ? "0 18px 60px rgba(183,157,138,0.10)"
+                      : "0 12px 36px rgba(183,157,138,0.12)"
+                    : "none",
+                }}
+                role="button"
+                tabIndex={0}
+                onClick={() => analyzeFileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") analyzeFileInputRef.current?.click();
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(false);
+                  const file = e.dataTransfer?.files?.[0];
+                  if (file) ingestAnalyzeImageFile(file);
+                }}
+                aria-label="Зона загрузки изображения"
+              >
                 <input
+                  ref={analyzeFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   onChange={handleImageFileChange}
                   style={fileInputStyle}
                 />
 
                 {selectedImagePreviewUrl ? (
-                  <div style={uploadPreviewStyle}>
-                    <img
-                      src={selectedImagePreviewUrl}
-                      alt="Предпросмотр загруженного изображения"
-                      style={{ width: "100%", display: "block" }}
-                    />
-                  </div>
+                  <>
+                    <div style={uploadPreviewStyle}>
+                      <img
+                        src={selectedImagePreviewUrl}
+                        alt="Предпросмотр загруженного изображения"
+                        style={{ width: "100%", display: "block" }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        lineHeight: 1.5,
+                        color: isDark ? "rgba(243,238,231,0.70)" : "rgba(110,106,102,0.88)",
+                      }}
+                    >
+                      {selectedImageFileName}
+                      {selectedImageDimensions?.width && selectedImageDimensions?.height
+                        ? ` · ${selectedImageDimensions.width}×${selectedImageDimensions.height}`
+                        : ""}
+                    </div>
+                    <button
+                      type="button"
+                      style={{
+                        ...secondaryButton,
+                        margin: 0,
+                        padding: "10px 16px",
+                        fontSize: "14px",
+                        borderRadius: "12px",
+                        boxSizing: "border-box",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        analyzeFileInputRef.current?.click();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0px)";
+                      }}
+                    >
+                      Загрузить другое
+                    </button>
+                  </>
                 ) : (
                   <div>
                     <div style={uploadHintStyle}>
-                      Загрузите рендер, фото или визуализацию интерьера
+                      Перетащите изображение сюда или загрузите файл кнопкой ниже
                     </div>
                     <div
                       style={{
@@ -3282,11 +4149,34 @@ export default function Home() {
                         color: isDark ? "rgba(243,238,231,0.60)" : "rgba(110,106,102,0.82)",
                       }}
                     >
-                      Поддерживаются изображения (JPG/PNG/WebP)
+                      JPG / PNG / WebP
                     </div>
+                    <button
+                      type="button"
+                      style={{
+                        ...primaryButton,
+                        margin: "14px auto 0 auto",
+                        padding: "12px 18px",
+                        fontSize: "14px",
+                        borderRadius: "12px",
+                        boxSizing: "border-box",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        analyzeFileInputRef.current?.click();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0px)";
+                      }}
+                    >
+                      Загрузить изображение
+                    </button>
                   </div>
                 )}
-              </label>
+              </div>
 
               <button
                 style={actionButtonStyle}
@@ -3301,80 +4191,69 @@ export default function Home() {
                   e.currentTarget.style.transform = "translateY(0px)";
                 }}
               >
-                {isRunning ? "Проанализируем…" : "Проанализировать"}
+                {isRunning ? "Анализируем…" : "Анализировать интерьер"}
               </button>
 
               <div style={aiResultModuleStyle}>
                 <div style={aiResultHeaderAnalyzeStyle}>
-                  <div style={aiResultHeaderTitleStyle}>AI Vision Analysis</div>
+                  <div style={aiResultHeaderTitleStyle}>OSA Semantic Analysis</div>
                   <div style={aiResultHeaderSubtitleStyle}>
                     {analyzeImageResult
-                      ? "Анализ сформирован и готов к подбору"
+                      ? "Семантический разбор готов"
                       : isAnalyzeLoading
-                        ? "Распознаем элементы и собираем рекомендации…"
-                        : "Загрузите изображение и нажмите «Проанализировать»"}
+                        ? "Собираем семантику, палитру и материалы…"
+                        : "Загрузите изображение и нажмите «Анализировать интерьер»"}
                   </div>
                 </div>
 
                 <div style={aiResultContentStyle}>
                   {analyzeImageResult ? (
-                    <div style={aiFieldsGridStyle}>
-                      <div style={{ ...aiFieldCardAnalyzeStyle, gridColumn: "1 / -1" }}>
-                        <div style={aiFieldLabelStyle}>Что распознано</div>
-                        <ul style={aiBulletListStyle}>
-                          {analyzeImageResult.recognized.map((r) => (
-                            <li key={r} style={aiBulletItemStyle}>
-                              {r}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    <>
+                      <SemanticAnalysisCards
+                        result={analyzeImageResult}
+                        revealStyle={generateRevealStyle(isAnalyzeResultVisible)}
+                        cardStyle={aiFieldCardAnalyzeStyle}
+                        labelStyle={aiFieldLabelStyle}
+                        valueStyle={aiFieldValueStyle}
+                        chipStyle={aiChipAnalyzeStyle}
+                      />
 
-                      <div style={aiFieldCardAnalyzeStyle}>
-                        <div style={aiFieldLabelStyle}>Предполагаемый стиль</div>
-                        <div style={aiFieldValueStyle}>{analyzeImageResult.style}</div>
-                      </div>
-
-                      <div style={aiFieldCardAnalyzeStyle}>
-                        <div style={aiFieldLabelStyle}>Сильные стороны</div>
-                        <ul style={aiBulletListStyle}>
-                          {analyzeImageResult.strengths.map((s) => (
-                            <li key={s} style={aiBulletItemStyle}>
-                              {s}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div style={aiFieldCardAnalyzeStyle}>
-                        <div style={aiFieldLabelStyle}>Что улучшить</div>
-                        <ul style={aiBulletListStyle}>
-                          {analyzeImageResult.improvements.map((i) => (
-                            <li key={i} style={aiBulletItemStyle}>
-                              {i}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div style={{ ...aiFieldCardAnalyzeStyle, gridColumn: "1 / -1" }}>
-                        <div style={aiFieldLabelStyle}>Категории для подбора</div>
-                        <div style={aiChipsContainerStyle}>
-                          {analyzeImageResult.categoriesForSelection.map((c) => (
-                            <span key={c} style={aiChipAnalyzeStyle}>
-                              {c}
-                            </span>
-                          ))}
+                      {Array.isArray(analyzeHistory) && analyzeHistory.length > 0 ? (
+                        <div style={{ marginTop: "14px" }}>
+                          <div style={{ ...aiFieldLabelStyle, marginBottom: "10px" }}>HISTORY</div>
+                          <div style={aiChipsContainerStyle}>
+                            {analyzeHistory.slice(0, 5).map((row) => (
+                              <button
+                                key={row.id}
+                                type="button"
+                                style={{
+                                  ...aiChipAnalyzeStyle,
+                                  cursor: "pointer",
+                                  background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.65)",
+                                }}
+                                onClick={() => restoreSemanticAnalysisFromRecord(row)}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.transform = "translateY(-1px)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.transform = "translateY(0px)";
+                                }}
+                              >
+                                {(row.fileName ? String(row.fileName).slice(0, 18) : "analysis") +
+                                  (row.fileName && String(row.fileName).length > 18 ? "…" : "")}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    </div>
+                      ) : null}
+                    </>
                   ) : (
                     <div style={aiEmptyStateStyle}>
                       <div style={aiEmptyTitleStyle}>Результат анализа</div>
                       <div style={aiEmptyTextStyle}>
                         {isAnalyzeLoading
-                          ? "Система оценивает изображение и готовит структурированный разбор…"
-                          : "После загрузки изображения нажмите «Проанализировать» — появится аналитический вывод и категории для подбора."}
+                          ? "Система формирует стиль, материалы, палитру, объекты и атмосферу…"
+                          : "Загрузите изображение и нажмите «Анализировать интерьер» — появится cinematic semantic-разбор."}
                       </div>
                     </div>
                   )}
@@ -3449,38 +4328,296 @@ export default function Home() {
               <div style={workspaceGeneratePromptBlockStyle}>
                 <div style={{ ...workspaceLabelStyle, marginBottom: "12px" }}>
                   Текст для генерации визуала
+                  <span
+                    style={{
+                      marginLeft: "10px",
+                      fontSize: "12px",
+                      letterSpacing: "0.02em",
+                      fontWeight: 500,
+                      color: isDark ? "rgba(243,238,231,0.58)" : "rgba(110,106,102,0.78)",
+                    }}
+                  >
+                    {activePromptVersion
+                      ? `Сейчас в работе: ${activePromptVersion.title || "Версия"}`
+                      : "Сейчас в работе: несохранённая правка"}
+                  </span>
                 </div>
                 <textarea
                   value={interiorDescription}
                   onChange={(e) => {
                     setInteriorDescription(e.target.value);
+                    if (activeProjectKey && activePromptVersionId) {
+                      setActivePromptVersionIdState(null);
+                      setActivePromptVersionId(activeProjectKey, null);
+                    }
                     setImageError("");
                   }}
                   placeholder="Кратко опишите задачу для рендера (подпись к визуалу)…"
                   style={textareaStyle}
                 />
-                <button
-                  type="button"
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    style={{
+                      ...secondaryButton,
+                      marginTop: "12px",
+                      padding: "10px 18px",
+                      fontSize: "14px",
+                      borderRadius: "12px",
+                      boxSizing: "border-box",
+                      opacity: !promptDirty ? 0.5 : 1,
+                      cursor: !promptDirty ? "default" : "pointer",
+                    }}
+                    disabled={!activeProjectKey || !promptDirty}
+                    onClick={handleSavePromptVersion}
+                    onMouseEnter={(e) => {
+                      if (!activeProjectKey || !promptDirty) return;
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "translateY(0px)";
+                    }}
+                  >
+                    Сохранить версию промпта
+                  </button>
+
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      fontSize: "13px",
+                      padding: "8px 12px",
+                      borderRadius: "999px",
+                      border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.06)",
+                      background: isDark ? "rgba(0,0,0,0.16)" : "rgba(255,255,255,0.55)",
+                      color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.88)",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {promptDirty ? "Есть несохранённые изменения" : "Сохранено"}
+                    {promptSaveNotice ? <span style={{ opacity: 0.75 }}> · {promptSaveNotice}</span> : null}
+                  </div>
+                </div>
+
+                <div
                   style={{
-                    ...secondaryButton,
-                    marginTop: "12px",
-                    padding: "10px 18px",
-                    fontSize: "14px",
-                    borderRadius: "12px",
-                    boxSizing: "border-box",
-                  }}
-                  disabled={!activeProjectKey}
-                  onClick={handleSaveProjectPromptText}
-                  onMouseEnter={(e) => {
-                    if (!activeProjectKey) return;
-                    e.currentTarget.style.transform = "translateY(-2px)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = "translateY(0px)";
+                    marginTop: "14px",
+                    padding: "12px 12px",
+                    borderRadius: "14px",
+                    textAlign: "left",
+                    background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.45)",
+                    border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+                    boxShadow:
+                      isDark ? "none" : "0 4px 14px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.48)",
+                    backdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+                    WebkitBackdropFilter: isDark ? "blur(16px)" : "blur(12px)",
                   }}
                 >
-                  Сохранить текст
-                </button>
+                  <button
+                    type="button"
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      border: "none",
+                      background: "transparent",
+                      padding: "6px 4px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      color: "inherit",
+                      fontFamily: "inherit",
+                      transition: "background-color 220ms ease, box-shadow 260ms ease, opacity 220ms ease",
+                      willChange: "background-color, box-shadow, opacity",
+                    }}
+                    onClick={() => setPromptHistoryOpen((v) => !v)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = "0.96";
+                      e.currentTarget.style.boxShadow = isDark
+                        ? "0 0 0 rgba(0,0,0,0)"
+                        : "0 10px 22px rgba(0,0,0,0.04)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = "1";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                    aria-expanded={promptHistoryOpen}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ ...aiFieldLabelStyle, marginBottom: "4px" }}>История промптов</div>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          lineHeight: 1.4,
+                          color: isDark ? "rgba(243,238,231,0.70)" : "rgba(110,106,102,0.88)",
+                        }}
+                      >
+                        {promptVersions.length} {promptVersions.length === 1 ? "версия" : "версии"} ·{" "}
+                        {activePromptVersion
+                          ? `Сейчас: ${activePromptVersion.title || "Версия"}`
+                          : "Сейчас: несохранённая правка"}
+                      </div>
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: "14px", flexShrink: 0 }}>
+                      {promptHistoryOpen ? "Свернуть" : "Открыть"}
+                    </div>
+                  </button>
+
+                  {promptHistoryOpen ? (
+                    <div style={{ marginTop: "10px" }}>
+                      {promptVersions.length ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {promptVersions.slice(0, 10).map((v) => {
+                            const isActive =
+                              activeProjectKey &&
+                              activePromptVersionId &&
+                              String(activePromptVersionId) === String(v.id);
+                            return (
+                              <div
+                                key={v.id}
+                                style={{
+                                  borderRadius: "12px",
+                                  padding: "9px 10px",
+                                  background: isActive
+                                    ? isDark
+                                      ? "rgba(210,180,155,0.10)"
+                                      : "rgba(210,180,155,0.16)"
+                                    : isDark
+                                      ? "rgba(0,0,0,0.14)"
+                                      : "rgba(255,255,255,0.55)",
+                                  border: isActive
+                                    ? isDark
+                                      ? "1px solid rgba(183,157,138,0.38)"
+                                      : "1px solid rgba(183,157,138,0.35)"
+                                    : isDark
+                                      ? "1px solid rgba(255,255,255,0.08)"
+                                      : "1px solid rgba(0,0,0,0.04)",
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  justifyContent: "space-between",
+                                  gap: "10px",
+                                  cursor: "pointer",
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => handleMakePromptVersionCurrent(v)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    handleMakePromptVersionCurrent(v);
+                                  }
+                                }}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: "13px",
+                                      fontWeight: 650,
+                                      color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)",
+                                    }}
+                                  >
+                                    {v.title || "Версия"}
+                                    {isActive ? (
+                                      <span style={{ marginLeft: "8px", opacity: 0.75, fontWeight: 600 }}>
+                                        · активна
+                                      </span>
+                                    ) : null}
+                                    <span style={{ opacity: 0.55, fontWeight: 500 }}>
+                                      {" "}
+                                      · {new Date(v.createdAt).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div
+                                    style={{
+                                      marginTop: "6px",
+                                      fontSize: "12.5px",
+                                      lineHeight: 1.45,
+                                      color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.88)",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: "vertical",
+                                    }}
+                                  >
+                                    {String(v.text || "").trim() || "—"}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "8px", flexShrink: 0 }}>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      ...secondaryButton,
+                                      margin: 0,
+                                      padding: "8px 10px",
+                                      fontSize: "13px",
+                                      borderRadius: "12px",
+                                      boxSizing: "border-box",
+                                      transform: "translateY(0px)",
+                                      transition:
+                                        "background-color 220ms ease, border-color 220ms ease, box-shadow 260ms ease, opacity 220ms ease",
+                                      willChange: "background-color, border-color, box-shadow, opacity",
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMakePromptVersionCurrent(v);
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.boxShadow = isDark
+                                        ? "0 14px 30px rgba(0,0,0,0.18)"
+                                        : "0 10px 24px rgba(0,0,0,0.08)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.boxShadow = "none";
+                                    }}
+                                  >
+                                    Сделать текущей
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      ...secondaryButton,
+                                      margin: 0,
+                                      padding: "8px 10px",
+                                      fontSize: "13px",
+                                      borderRadius: "12px",
+                                      boxSizing: "border-box",
+                                      opacity: promptVersions.length <= 1 ? 0.45 : 1,
+                                      transform: "translateY(0px)",
+                                      transition:
+                                        "background-color 220ms ease, border-color 220ms ease, box-shadow 260ms ease, opacity 220ms ease",
+                                      willChange: "background-color, border-color, box-shadow, opacity",
+                                    }}
+                                    disabled={promptVersions.length <= 1}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeletePromptVersion(v.id);
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      if (promptVersions.length <= 1) return;
+                                      e.currentTarget.style.boxShadow = isDark
+                                        ? "0 14px 30px rgba(0,0,0,0.18)"
+                                        : "0 10px 24px rgba(0,0,0,0.08)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.boxShadow = "none";
+                                    }}
+                                  >
+                                    Удалить
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ ...aiEmptyTextStyle, margin: 0 }}>
+                          Сохраните первую версию — здесь появится история.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               {resultData ? (
                 <>
@@ -3551,7 +4688,7 @@ export default function Home() {
                     <div style={imageInnerStyle}>
                       {imageError ? (
                         <div style={aiEmptyTextStyle}>{imageError}</div>
-                      ) : previewImageBase64 && String(previewImageBase64).trim() ? (
+                      ) : stablePreviewImageBase64 && String(stablePreviewImageBase64).trim() ? (
                         <>
                           <div
                             style={{
@@ -3563,7 +4700,7 @@ export default function Home() {
                             }}
                           >
                             <img
-                              src={`data:image/png;base64,${previewImageBase64}`}
+                              src={`data:image/png;base64,${stablePreviewImageBase64}`}
                               alt="Сгенерированный визуал интерьера"
                               style={{ width: "100%", height: "auto", display: "block" }}
                             />
@@ -3602,11 +4739,15 @@ export default function Home() {
                               return (
                                 <div key={item.id} style={getSessionGalleryCardStyle(isSel)}>
                                   <div style={{ position: "relative", ...sessionGalleryThumbStyle }}>
-                                    {item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind] ? (
-                                      <span style={sessionGalleryVariantBadgeStyle}>
-                                        {ALTERNATE_KIND_LABEL_RU[item.alternateKind]}
-                                      </span>
-                                    ) : null}
+                                    <span style={sessionGalleryVariantBadgeStyle}>
+                                      {item.iterationType === "text_edit"
+                                        ? "ПРАВКА"
+                                        : item.variationLabel
+                                          ? item.variationLabel
+                                          : item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]
+                                            ? ALTERNATE_KIND_LABEL_RU[item.alternateKind]
+                                            : "Основной"}
+                                    </span>
                                     {item.imageBase64 && String(item.imageBase64).trim() ? (
                                       <img
                                         src={`data:image/png;base64,${item.imageBase64}`}
@@ -3649,6 +4790,72 @@ export default function Home() {
                               </div>
                             ) : null}
                           </div>
+                        </div>
+                      ) : null}
+
+                      {selectedSessionVisual ? (
+                        <div
+                          style={{
+                            marginTop: "18px",
+                            padding: "14px 14px",
+                            borderRadius: "14px",
+                            textAlign: "left",
+                            background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.45)",
+                            border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+                            boxShadow: isDark
+                              ? "none"
+                              : "0 4px 14px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.48)",
+                            backdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+                            WebkitBackdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+                          }}
+                        >
+                          <div style={{ ...aiFieldLabelStyle, marginBottom: "6px" }}>
+                            Правка выбранного визуала
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              lineHeight: 1.45,
+                              marginBottom: "10px",
+                              color: isDark ? "rgba(243,238,231,0.70)" : "rgba(110,106,102,0.88)",
+                            }}
+                          >
+                            Создать новую итерацию на основе выбранного варианта
+                          </div>
+                          <textarea
+                            value={visualEditInstruction}
+                            onChange={(e) => setVisualEditInstruction(e.target.value)}
+                            placeholder="Например: убрать жёлтый оттенок, заменить кресло на более графичное, добавить белые фасады, сохранить композицию..."
+                            style={{
+                              ...textareaStyle,
+                              minHeight: "74px",
+                              marginBottom: "10px",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            style={{
+                              ...primaryButton,
+                              margin: 0,
+                              padding: "12px 18px",
+                              fontSize: "14px",
+                              borderRadius: "12px",
+                              boxSizing: "border-box",
+                              opacity: isImageRunning ? 0.65 : 1,
+                            }}
+                            disabled={isImageRunning || !String(visualEditInstruction || "").trim()}
+                            onClick={handleCreateTextEditIteration}
+                            onMouseEnter={(e) => {
+                              if (isImageRunning) return;
+                              e.currentTarget.style.transform = "translateY(-2px)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (isImageRunning) return;
+                              e.currentTarget.style.transform = "translateY(0px)";
+                            }}
+                          >
+                            {isImageRunning && imageRequestKind === "text_edit" ? "Создаем…" : "Создать правку"}
+                          </button>
                         </div>
                       ) : null}
                     </div>
