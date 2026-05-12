@@ -49,6 +49,7 @@ import {
 } from "./lib/generationPackageUtils";
 import { attachRelatedEditableObjectsToSpecGroups } from "./lib/editableObjectsUtils";
 import { attachRelatedSceneObjectsToSpecGroups } from "./lib/sceneGraphUtils";
+import { useResponsiveLayout, rv } from "./lib/responsiveLayout";
 
 /** Atmosphere modes (image API + badges). English labels as design system. */
 const ATMOSPHERE_KEYS = [
@@ -365,7 +366,7 @@ function AtmosphereDropdown({ value, onChange, disabled, isDark }) {
                   color: isDark ? "#F3EEE7" : "#2B2B2B",
                   fontWeight: 500,
                   letterSpacing: "0.02em",
-                  fontSize: "14px",
+                  fontSize: isMobile ? "13px" : "14px",
                   fontFamily: "inherit",
                   cursor: "pointer",
                   textAlign: "left",
@@ -1397,7 +1398,7 @@ export default function Home() {
   const [isAnalyzeDropActive, setIsAnalyzeDropActive] = useState(false);
   const [activeProjectKey, setActiveProjectKey] = useState(null);
   const [atmosphereChoice, setAtmosphereChoice] = useState("architectural_white");
-  const [workspaceNarrow, setWorkspaceNarrow] = useState(false);
+  const { isMobile, workspaceNarrow, workspaceThreeColumn } = useResponsiveLayout();
   const [lightAmbientRgb, setLightAmbientRgb] = useState(null);
   const prevActiveProjectKeyRef = useRef(null);
   const analyzeFileInputRef = useRef(null);
@@ -2381,14 +2382,6 @@ export default function Home() {
   }, [projectList, activeProjectKey]);
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1199px)");
-    const update = () => setWorkspaceNarrow(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-
-  useEffect(() => {
     setShowImagePromptDetails(false);
   }, [activeProjectKey, selectedSessionVisual?.id]);
 
@@ -2413,7 +2406,7 @@ export default function Home() {
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "center",
-    padding: "24px 20px 48px 20px",
+    padding: rv(isMobile, "24px 20px 48px 20px", "14px 16px 28px 16px"),
     background: isDark
       ? `${workspaceProjectPalette?.mainRadialExtraDark ?? ""}radial-gradient(circle at 20% 20%,#32353A 0%,#1D1F22 45%,#141516 100%)`
       : `${workspaceProjectPalette?.mainRadialExtraLight ?? ""}radial-gradient(50% 50% at 20% 10%, rgba(183,157,138,0.10), transparent), radial-gradient(40% 40% at 80% 30%, rgba(160,150,190,0.08), transparent), #F3EEE7`,
@@ -2426,7 +2419,7 @@ export default function Home() {
 
   const workspaceShellStyle = {
     width: "100%",
-    maxWidth: "1680px",
+    maxWidth: rv(isMobile, "1680px", "none"),
     margin: "0 auto",
     boxSizing: "border-box",
   };
@@ -2443,17 +2436,18 @@ export default function Home() {
   };
 
   const workspaceGridStyle = {
-    display: "grid",
-    gridTemplateColumns: workspaceNarrow ? "minmax(0,1fr)" : "280px minmax(0,1fr) 320px",
-    gap: "24px",
+    display: rv(isMobile, "grid", "flex"),
+    flexDirection: rv(isMobile, undefined, "column"),
+    gridTemplateColumns: isMobile || !workspaceThreeColumn ? "minmax(0,1fr)" : "280px minmax(0,1fr) 320px",
+    gap: rv(isMobile, "24px", "16px"),
     alignItems: "start",
     width: "100%",
     boxSizing: "border-box",
   };
 
   const sidePanelBaseStyle = {
-    borderRadius: "22px",
-    padding: "20px 18px",
+    borderRadius: isMobile ? "18px" : "22px",
+    padding: rv(isMobile, "20px 18px", "14px 16px"),
     boxSizing: "border-box",
     background: isDark
       ? "linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))"
@@ -2496,14 +2490,14 @@ export default function Home() {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    alignItems: isAnalyzeMode ? "center" : "stretch",
+    alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
   };
 
   const panelStyle = {
     width: "100%",
-    maxWidth: "100%",
-    borderRadius: "28px",
-    padding: "28px 40px 52px 40px",
+    maxWidth: rv(isMobile, "100%", "none"),
+    borderRadius: rv(isMobile, "28px", "20px"),
+    padding: rv(isMobile, "28px 40px 52px 40px", "20px"),
     textAlign: "center",
     boxSizing: "border-box",
     background: isDark
@@ -2545,7 +2539,7 @@ export default function Home() {
 
   const heroBadgeStyle = {
     ...badgeStyle,
-    marginBottom: "26px",
+    marginBottom: isMobile ? "16px" : "26px",
     position: "relative",
     zIndex: 1,
   };
@@ -2565,10 +2559,10 @@ export default function Home() {
     left: "50%",
     top: "48%",
     transform: "translate(-50%, -50%)",
-    width: "min(720px, 110vw)",
-    height: "min(720px, 110vw)",
-    maxWidth: "820px",
-    maxHeight: "820px",
+    width: isMobile ? "min(320px, 88vw)" : "min(720px, 110vw)",
+    height: isMobile ? "min(320px, 88vw)" : "min(720px, 110vw)",
+    maxWidth: isMobile ? "360px" : "820px",
+    maxHeight: isMobile ? "360px" : "820px",
     borderRadius: "50%",
     background: isDark
       ? "radial-gradient(circle at center, rgba(183,157,138,0.18) 0%, rgba(183,157,138,0.08) 38%, transparent 70%)"
@@ -2592,10 +2586,10 @@ export default function Home() {
   const heroSectionStyle = {
     position: "relative",
     width: "100%",
-    maxWidth: "1040px",
+    maxWidth: rv(isMobile, "1040px", "none"),
     margin: "0 auto",
-    marginTop: "clamp(4px, 1.5vw, 16px)",
-    padding: "8px 12px 40px 12px",
+    marginTop: isMobile ? "0" : "clamp(4px, 1.5vw, 16px)",
+    padding: rv(isMobile, "8px 12px 40px 12px", "20px"),
     boxSizing: "border-box",
     textAlign: "center",
     animation: "osaHeroEnter 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both",
@@ -2605,11 +2599,11 @@ export default function Home() {
   };
 
   const titleStyle = {
-    fontSize: "clamp(46px, 4.8vw, 62px)",
-    lineHeight: "1.05",
+    fontSize: isMobile ? "clamp(1.5rem, 6.5vw, 34px)" : "clamp(2.875rem, 4.8vw, 3.875rem)",
+    lineHeight: isMobile ? "1.1" : "1.05",
     fontWeight: isDark ? "600" : "650",
     letterSpacing: "-0.022em",
-    margin: "0 0 24px 0",
+    margin: isMobile ? "0 0 16px 0" : "0 0 24px 0",
     position: "relative",
     zIndex: 1,
     color: isDark ? "#FAFAF8" : "#2B2B2B",
@@ -2619,10 +2613,10 @@ export default function Home() {
   };
 
   const textStyle = {
-    maxWidth: "720px",
-    margin: "0 auto 40px auto",
-    fontSize: "19px",
-    lineHeight: "1.72",
+    maxWidth: rv(isMobile, "720px", "none"),
+    margin: isMobile ? "0 auto 24px auto" : "0 auto 40px auto",
+    fontSize: isMobile ? "0.9375rem" : "19px",
+    lineHeight: isMobile ? "1.55" : "1.72",
     color: isDark ? "rgba(243,238,231,0.74)" : "#6E6A66",
     transition: "color 0.6s ease",
     position: "relative",
@@ -2686,10 +2680,11 @@ export default function Home() {
 
   const heroCtaPrimaryStyle = {
     ...primaryButton,
-    padding: "17px 36px",
-    fontSize: "17px",
-    borderRadius: "16px",
-    minWidth: "196px",
+    padding: isMobile ? "14px 20px" : "17px 36px",
+    fontSize: isMobile ? "15px" : "17px",
+    borderRadius: isMobile ? "14px" : "16px",
+    minWidth: isMobile ? "0" : "196px",
+    width: isMobile ? "100%" : undefined,
     boxSizing: "border-box",
     transition:
       "transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.38s ease, filter 0.38s ease",
@@ -2705,10 +2700,11 @@ export default function Home() {
 
   const heroCtaSecondaryStyle = {
     ...secondaryButton,
-    padding: "17px 36px",
-    fontSize: "17px",
-    borderRadius: "16px",
-    minWidth: "196px",
+    padding: isMobile ? "12px 16px" : "17px 36px",
+    fontSize: isMobile ? "13px" : "17px",
+    borderRadius: isMobile ? "14px" : "16px",
+    minWidth: isMobile ? "0" : "196px",
+    width: isMobile ? "100%" : undefined,
     boxSizing: "border-box",
   };
 
@@ -2720,9 +2716,13 @@ export default function Home() {
     : "0 12px 28px rgba(0,0,0,0.08), 0 2px 0 rgba(160,150,190,0.1), inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -1px 0 rgba(0,0,0,0.03)";
 
   const statStyle = {
-    flex: "1 1 0",
-    minWidth: "0",
-    padding: "18px 20px",
+    flex: isMobile ? "0 0 auto" : "1 1 0",
+    flexShrink: isMobile ? 0 : undefined,
+    minWidth: isMobile ? "220px" : "0",
+    width: isMobile ? "220px" : undefined,
+    maxWidth: isMobile ? "260px" : undefined,
+    height: isMobile ? "auto" : undefined,
+    padding: isMobile ? "14px 14px" : "18px 20px",
     borderRadius: "18px",
     boxSizing: "border-box",
     background: isDark
@@ -2760,27 +2760,37 @@ export default function Home() {
 
   const statsRowWrapperStyle = {
     width: "100%",
-    maxWidth: "760px",
+    maxWidth: rv(isMobile, "760px", "none"),
     margin: "0 auto",
     padding: 0,
     boxSizing: "border-box",
     display: "flex",
-    gap: "14px",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    gap: isMobile ? "12px" : "14px",
+    flexWrap: isMobile ? "nowrap" : "wrap",
+    justifyContent: isMobile ? "flex-start" : "center",
+    overflowX: isMobile ? "auto" : "visible",
+    overscrollBehaviorX: isMobile ? "contain" : undefined,
+    scrollSnapType: isMobile ? "x mandatory" : undefined,
+    WebkitOverflowScrolling: isMobile ? "touch" : undefined,
   };
 
   const workspaceCardStyle = {
-    maxWidth: isAnalyzeMode ? "min(1080px, 100%)" : "760px",
+    maxWidth: isMobile ? "none" : isAnalyzeMode ? "min(1080px, 100%)" : "760px",
     width: "100%",
-    margin: "28px auto 48px auto",
-    borderRadius: "22px",
-    padding: isAnalyzeMode ? "18px 16px" : "22px 20px",
+    margin: isMobile ? "16px auto 28px auto" : "28px auto 48px auto",
+    borderRadius: isMobile ? "18px" : "22px",
+    padding: isMobile
+      ? isAnalyzeMode
+        ? "14px 12px"
+        : "16px 12px"
+      : isAnalyzeMode
+        ? "18px 16px"
+        : "22px 20px",
     textAlign: "center",
     boxSizing: "border-box",
     display: "flex",
     flexDirection: "column",
-    alignItems: isAnalyzeMode ? "center" : "stretch",
+    alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
     ...(workspaceProjectPalette
       ? {
           background: isDark
@@ -2825,15 +2835,15 @@ export default function Home() {
   };
 
   const modeTabsWrapperStyle = {
-    maxWidth: "680px",
+    maxWidth: rv(isMobile, "680px", "none"),
     width: "100%",
-    margin: "0 auto 36px auto",
-    padding: "7px",
-    borderRadius: "18px",
+    margin: isMobile ? "0 auto 20px auto" : "0 auto 36px auto",
+    padding: isMobile ? "5px" : "7px",
+    borderRadius: isMobile ? "16px" : "18px",
     position: "relative",
     zIndex: 1,
     display: "flex",
-    gap: "6px",
+    gap: isMobile ? "4px" : "6px",
     background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)",
     border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
     boxShadow: isDark
@@ -2858,11 +2868,16 @@ export default function Home() {
 
   const getModeTabButtonStyle = (active) => ({
     flex: 1,
-    borderRadius: "14px",
+    borderRadius: isMobile ? "12px" : "14px",
     border: "none",
     cursor: "pointer",
-    padding: "14px 18px",
-    fontSize: "15px",
+    padding: isMobile ? "12px" : "14px 18px",
+    fontSize: isMobile ? "14px" : "15px",
+    minHeight: isMobile ? "44px" : undefined,
+    whiteSpace: "nowrap",
+    textAlign: "center",
+    overflow: isMobile ? "hidden" : undefined,
+    textOverflow: isMobile ? "ellipsis" : undefined,
     letterSpacing: "0.02em",
     fontWeight: active ? "650" : "520",
     color: active
@@ -2920,9 +2935,9 @@ export default function Home() {
     width: "100%",
     maxWidth: "100%",
     minWidth: 0,
-    minHeight: "130px",
+    minHeight: isMobile ? "112px" : "130px",
     margin: 0,
-    padding: "14px 14px",
+    padding: isMobile ? "12px 12px" : "14px 14px",
     borderRadius: "16px",
     border: workspaceProjectPalette
       ? workspaceProjectPalette.secondaryBorder
@@ -2951,11 +2966,18 @@ export default function Home() {
     ...primaryButton,
     display: "block",
     width: "100%",
-    maxWidth: "320px",
+    maxWidth: isMobile ? "100%" : "320px",
+    minHeight: isMobile ? "44px" : undefined,
     margin: "14px auto 0 auto",
     alignSelf: "center",
     boxSizing: "border-box",
     opacity: isRunning ? 0.75 : 1,
+  };
+
+  const generateVisualPrimaryButtonStyle = {
+    ...actionButtonStyle,
+    marginTop: 0,
+    ...(isMobile ? { flex: "none", maxWidth: "none", width: "100%" } : { flex: "1 1 200px", maxWidth: "320px" }),
   };
 
   const aiResultModuleStyle = {
@@ -2977,7 +2999,7 @@ export default function Home() {
   };
 
   const aiResultHeaderBaseStyle = {
-    padding: "16px 16px 14px 16px",
+    padding: isMobile ? "12px 12px 10px 12px" : "16px 16px 14px 16px",
     borderBottom: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
   };
 
@@ -2996,7 +3018,7 @@ export default function Home() {
   };
 
   const aiResultHeaderTitleStyle = {
-    fontSize: "13px",
+    fontSize: isMobile ? "12px" : "13px",
     letterSpacing: "0.10em",
     textTransform: "uppercase",
     fontWeight: "650",
@@ -3004,14 +3026,14 @@ export default function Home() {
   };
 
   const aiResultHeaderSubtitleStyle = {
-    marginTop: "8px",
-    fontSize: "15px",
+    marginTop: isMobile ? "6px" : "8px",
+    fontSize: isMobile ? "14px" : "15px",
     lineHeight: "1.5",
     color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.9)",
   };
 
   const aiResultContentStyle = {
-    padding: "16px 16px 18px 16px",
+    padding: isMobile ? "12px 12px 14px 12px" : "16px 16px 18px 16px",
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
@@ -3034,7 +3056,7 @@ export default function Home() {
   };
 
   const aiEmptyTextStyle = {
-    fontSize: "15px",
+    fontSize: isMobile ? "14px" : "15px",
     lineHeight: "1.65",
     color: isDark ? "rgba(243,238,231,0.78)" : "#6E6A66",
     whiteSpace: "pre-wrap",
@@ -3042,7 +3064,7 @@ export default function Home() {
 
   const aiFieldsGridStyle = {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
+    gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
     gap: "12px",
     width: "100%",
     minWidth: 0,
@@ -3051,7 +3073,7 @@ export default function Home() {
 
   const aiFieldCardBaseStyle = {
     borderRadius: "16px",
-    padding: "14px 14px 12px 14px",
+    padding: isMobile ? "10px 10px 8px 10px" : "14px 14px 12px 14px",
     background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.5)",
     boxShadow: isDark ? "none" : "0 4px 12px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.45)",
   };
@@ -3076,7 +3098,7 @@ export default function Home() {
   };
 
   const aiFieldValueStyle = {
-    fontSize: "15px",
+    fontSize: isMobile ? "14px" : "15px",
     lineHeight: "1.65",
     color: isDark ? "rgba(243,238,231,0.82)" : "rgba(43,43,43,0.88)",
   };
@@ -3089,12 +3111,12 @@ export default function Home() {
   };
 
   const aiChipStyleBase = {
-    padding: "7px 10px",
+    padding: isMobile ? "6px 8px" : "7px 10px",
     borderRadius: "999px",
-    fontSize: "13px",
+    fontSize: isMobile ? "12px" : "13px",
     lineHeight: "1.2",
     border: "1px solid transparent",
-    whiteSpace: "nowrap",
+    whiteSpace: isMobile ? "normal" : "nowrap",
   };
 
   const aiChipGenerateStyle = {
@@ -3124,7 +3146,7 @@ export default function Home() {
 
   const conceptSectionsGridStyle = {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
+    gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
     gap: "12px",
     marginTop: "10px",
     width: "100%",
@@ -3156,7 +3178,7 @@ export default function Home() {
     display: "flex",
     flexDirection: "column",
     alignItems: "stretch",
-    gap: workspaceNarrow ? "12px" : "16px",
+    gap: isMobile ? "10px" : workspaceNarrow ? "12px" : "16px",
     alignSelf: "stretch",
   };
 
@@ -3173,12 +3195,12 @@ export default function Home() {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: workspaceNarrow ? "min(42vh, 360px)" : "min(48vh, 420px)",
+    minHeight: isMobile ? "min(36vh, 280px)" : workspaceNarrow ? "min(42vh, 360px)" : "min(48vh, 420px)",
   };
 
   const analyzePreviewImageStyle = {
     width: "100%",
-    maxHeight: workspaceNarrow ? "min(56vh, 520px)" : "min(72vh, 760px)",
+    maxHeight: isMobile ? "min(48vh, 420px)" : workspaceNarrow ? "min(56vh, 520px)" : "min(72vh, 760px)",
     height: "auto",
     display: "block",
     objectFit: "contain",
@@ -3321,7 +3343,7 @@ export default function Home() {
     ...secondaryButton,
     display: "block",
     width: "100%",
-    maxWidth: "280px",
+    maxWidth: rv(isMobile, "280px", "none"),
     margin: "12px auto 0 auto",
     padding: "11px 18px",
     fontSize: "14px",
@@ -3361,7 +3383,8 @@ export default function Home() {
 
   const visualActionsRowStyle = {
     display: "flex",
-    flexWrap: "wrap",
+    flexDirection: rv(isMobile, "row", "column"),
+    flexWrap: isMobile ? "nowrap" : "wrap",
     gap: "10px",
     justifyContent: "center",
     alignItems: "stretch",
@@ -3373,8 +3396,9 @@ export default function Home() {
   const alternateVisualButtonStyle = {
     ...secondaryButton,
     display: "block",
-    flex: "1 1 200px",
-    maxWidth: "320px",
+    flex: rv(isMobile, "1 1 200px", "none"),
+    width: rv(isMobile, undefined, "100%"),
+    maxWidth: rv(isMobile, "320px", "none"),
     margin: "0 auto",
     padding: "15px 28px",
     fontSize: "16px",
@@ -3385,9 +3409,11 @@ export default function Home() {
 
   const alternateActionsClusterStyle = {
     display: "flex",
+    flexDirection: rv(isMobile, "row", "column"),
     flexWrap: "wrap",
     gap: "10px",
-    flex: "1 1 320px",
+    flex: rv(isMobile, "1 1 320px", "none"),
+    width: rv(isMobile, undefined, "100%"),
     maxWidth: "100%",
     justifyContent: "center",
     alignItems: "stretch",
@@ -3412,7 +3438,7 @@ export default function Home() {
 
   const sessionGalleryGridStyle = {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))",
+    gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(168px, 1fr))",
     gridAutoRows: "1fr",
     gap: "12px",
     width: "100%",
@@ -4580,7 +4606,7 @@ export default function Home() {
   }, [activeProjectKey, activeSavedAnalysisRecordId, selectedImageId, budgetDraftsVersion]);
 
   return (
-    <main style={mainStyle}>
+    <main className="osa-main" style={mainStyle}>
       <style>{`
         @keyframes osaContextReveal {
           from {
@@ -4613,11 +4639,15 @@ export default function Home() {
           color: inherit;
         }
       `}</style>
-      <div style={workspaceShellStyle}>
+      <div className="osa-workspace-shell" style={workspaceShellStyle}>
         <header style={workspaceHeaderMinimalStyle} aria-label="Верхняя панель" />
 
-        <div style={workspaceGridStyle}>
-          <aside style={sidePanelBaseStyle} aria-label={isAnalyzeMode ? "Project Memory" : "Проекты"}>
+        <div className="osa-workspace-grid" style={workspaceGridStyle}>
+          <aside
+            className="osa-workspace-sidebar-left"
+            style={sidePanelBaseStyle}
+            aria-label={isAnalyzeMode ? "Project Memory" : "Проекты"}
+          >
             {isAnalyzeMode && activeProjectKey ? (
               <ProjectMemory
                 savedRecords={savedAnalysisRecords}
@@ -4636,6 +4666,7 @@ export default function Home() {
                 }
                 activeSemanticDraft={semanticDraft}
                 isDark={isDark}
+                isMobile={isMobile}
                 onOpenSavedRecord={openSavedAnalysisDocument}
               />
             ) : (
@@ -4774,10 +4805,10 @@ export default function Home() {
             )}
           </aside>
 
-          <div style={workspaceCenterColumnStyle}>
-            <div style={panelStyle}>
+          <div className="osa-workspace-center" style={workspaceCenterColumnStyle}>
+            <div className="osa-workspace-panel" style={panelStyle}>
         {!activeProjectKey ? (
-        <div style={heroSectionStyle}>
+        <div className="osa-hero-section" style={heroSectionStyle}>
           <div style={heroLogoAnchorStyle}>
             <div style={heroLogoGlowOrbStyle} aria-hidden />
             <div style={heroLogoInnerWrapStyle}>
@@ -4785,7 +4816,7 @@ export default function Home() {
                 src="/logo.png"
                 alt="OSA"
                 style={{
-                  width: workspaceNarrow ? "clamp(72px, 22vw, 90px)" : "clamp(96px, 11vw, 130px)",
+                  width: isMobile ? "clamp(64px, 18vw, 80px)" : workspaceNarrow ? "clamp(72px, 22vw, 90px)" : "clamp(96px, 11vw, 130px)",
                   height: "auto",
                   position: "relative",
                   zIndex: 2,
@@ -4808,23 +4839,26 @@ export default function Home() {
               <span>{isDark ? "Graphite poetry" : "Silver mist"}</span>
             </div>
           </div>
-          <h1 style={titleStyle}>
+          <h1 className="osa-hero-title" style={titleStyle}>
             Платформа, где интерьер
             <br />
             становится системой
           </h1>
 
-          <p style={textStyle}>
+          <p className="osa-hero-subtitle" style={textStyle}>
             OSA помогает дизайнеру быстрее перейти от визуального образа к реальным решениям:
             материалам, брендам, подбору, логике проекта и будущей смете — в одном ясном пространстве.
           </p>
 
         <div
+          className="osa-hero-cta-row"
           style={{
             display: "flex",
             justifyContent: "center",
-            gap: "18px",
-            flexWrap: "wrap",
+            gap: isMobile ? "12px" : "18px",
+            flexDirection: isMobile ? "column" : "row",
+            alignItems: isMobile ? "stretch" : "center",
+            flexWrap: isMobile ? "nowrap" : "wrap",
             marginBottom: "8px",
             position: "relative",
             zIndex: 1,
@@ -4850,12 +4884,7 @@ export default function Home() {
 
           <button
             type="button"
-            style={{
-              ...heroCtaSecondaryStyle,
-              fontSize: "13px",
-              padding: "10px 16px",
-              opacity: 0.88,
-            }}
+            style={heroCtaSecondaryStyle}
             onClick={() => setTheme(isDark ? "light" : "dark")}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = "translateY(-2px)";
@@ -4872,13 +4901,14 @@ export default function Home() {
         </div>
         ) : null}
 
-        <div id="osa-workspace-anchor" style={workspaceCardStyle}>
-          <div style={workspaceModeTabsStickyStyle} role="tablist" aria-label="Режимы работы">
+        <div id="osa-workspace-anchor" className="osa-workspace-card" style={workspaceCardStyle}>
+          <div className="osa-mode-tabs" style={workspaceModeTabsStickyStyle} role="tablist" aria-label="Режимы работы">
             <button
               type="button"
               role="tab"
               aria-selected={isGenerateMode}
               onClick={() => setMode("generate")}
+              className="osa-mode-tab"
               style={getModeTabButtonStyle(isGenerateMode)}
             >
               Создать интерьер
@@ -4888,6 +4918,7 @@ export default function Home() {
               role="tab"
               aria-selected={isAnalyzeMode}
               onClick={() => setMode("analyze")}
+              className="osa-mode-tab"
               style={getModeTabButtonStyle(isAnalyzeMode)}
             >
               Анализировать изображение
@@ -4900,6 +4931,7 @@ export default function Home() {
               <div style={workspaceGeneratePromptBlockStyle}>
                 <div style={{ ...workspaceLabelStyle, marginBottom: "12px" }}>Описание интерьера</div>
                 <textarea
+                  className="osa-form-textarea"
                   value={interiorDescription}
                   onChange={(e) => {
                     setInteriorDescription(e.target.value);
@@ -4918,8 +4950,8 @@ export default function Home() {
               </div>
 
               <button
+                className="osa-primary-button"
                 style={actionButtonStyle}
-                onClick={handleGenerateInteriorConcept}
                 disabled={isRunning || !interiorDescription.trim()}
                 onMouseEnter={(e) => {
                   if (isRunning) return;
@@ -4947,7 +4979,10 @@ export default function Home() {
 
                 <div style={aiResultContentStyle}>
                   {resultData ? (
-                    <div style={{ ...aiFieldsGridStyle, ...generateRevealStyle(isGenerateResultVisible) }}>
+                    <div
+                      className="osa-ai-fields-grid"
+                      style={{ ...aiFieldsGridStyle, ...generateRevealStyle(isGenerateResultVisible) }}
+                    >
                       <div
                         style={{
                           ...aiFieldCardGenerateStyle,
@@ -5034,7 +5069,7 @@ export default function Home() {
                         }}
                       >
                         <div style={aiFieldLabelStyle}>Концепция</div>
-                        <div style={conceptSectionsGridStyle}>
+                        <div className="osa-concept-grid" style={conceptSectionsGridStyle}>
                           <div style={conceptSectionCardStyle}>
                             <div style={conceptSectionTitleStyle}>Планировка</div>
                             <div style={aiFieldValueStyle}>{resultData.concept.planning}</div>
@@ -5077,7 +5112,8 @@ export default function Home() {
                 <>
                   <div style={visualActionsRowStyle}>
                     <button
-                      style={{ ...actionButtonStyle, marginTop: 0, flex: "1 1 200px", maxWidth: "320px" }}
+                      className="osa-primary-button"
+                      style={generateVisualPrimaryButtonStyle}
                       onClick={() => handleGenerateVisual(false)}
                       disabled={isImageRunning || isRunning || !interiorDescription.trim()}
                       onMouseEnter={(e) => {
@@ -5101,12 +5137,12 @@ export default function Home() {
                         isDark={isDark}
                       />
                       <button
+                        className="osa-primary-button"
                         style={{
                           ...alternateVisualButtonStyle,
-                          flex: "1 1 200px",
-                          maxWidth: "320px",
-                          margin: 0,
-                          alignSelf: "stretch",
+                          ...(isMobile
+                            ? { flex: "none", maxWidth: "none", width: "100%", margin: 0, alignSelf: "stretch" }
+                            : { flex: "1 1 200px", maxWidth: "320px", margin: 0, alignSelf: "stretch" }),
                         }}
                         onClick={() => handleGenerateVisual(true)}
                         disabled={
@@ -5179,7 +5215,7 @@ export default function Home() {
                       {sessionVisualGallery.length > 0 ? (
                         <div style={sessionGallerySectionStyle}>
                           <div style={sessionGalleryTitleStyle}>Варианты для этой концепции</div>
-                          <div style={sessionGalleryGridStyle}>
+                          <div className="osa-session-gallery-grid" style={sessionGalleryGridStyle}>
                             {sessionVisualGallery.map((item, index) => {
                               const isSel = selectedSessionVisual?.id === item.id;
                               return (
@@ -5348,6 +5384,7 @@ export default function Home() {
                             </div>
                           ) : null}
                           <textarea
+                            className="osa-form-textarea"
                             value={visualEditInstruction}
                             onChange={(e) => setVisualEditInstruction(e.target.value)}
                             placeholder="Например: убрать жёлтый оттенок, заменить кресло на более графичное, добавить белые фасады, сохранить композицию..."
@@ -5363,7 +5400,7 @@ export default function Home() {
                               ...primaryButton,
                               margin: 0,
                               padding: "12px 18px",
-                              fontSize: "14px",
+                              fontSize: isMobile ? "13px" : "14px",
                               borderRadius: "12px",
                               boxSizing: "border-box",
                               opacity: isImageRunning ? 0.65 : 1,
@@ -5444,7 +5481,7 @@ export default function Home() {
                   <p
                     style={{
                       margin: 0,
-                      fontSize: "14px",
+                      fontSize: isMobile ? "13px" : "14px",
                       lineHeight: 1.55,
                       color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.88)",
                     }}
@@ -5472,6 +5509,7 @@ export default function Home() {
                   </span>
                 </div>
                 <textarea
+                  className="osa-form-textarea"
                   value={interiorDescription}
                   onChange={(e) => {
                     setInteriorDescription(e.target.value);
@@ -5491,7 +5529,7 @@ export default function Home() {
                       ...secondaryButton,
                       marginTop: "12px",
                       padding: "10px 18px",
-                      fontSize: "14px",
+                      fontSize: isMobile ? "13px" : "14px",
                       borderRadius: "12px",
                       boxSizing: "border-box",
                       opacity: !promptDirty ? 0.5 : 1,
@@ -5752,7 +5790,8 @@ export default function Home() {
                 <>
                   <div style={visualActionsRowStyle}>
                     <button
-                      style={{ ...actionButtonStyle, marginTop: 0, flex: "1 1 200px", maxWidth: "320px" }}
+                      className="osa-primary-button"
+                      style={generateVisualPrimaryButtonStyle}
                       onClick={() => handleGenerateVisual(false)}
                       disabled={isImageRunning || isRunning || !interiorDescription.trim()}
                       onMouseEnter={(e) => {
@@ -5776,12 +5815,12 @@ export default function Home() {
                         isDark={isDark}
                       />
                       <button
+                        className="osa-primary-button"
                         style={{
                           ...alternateVisualButtonStyle,
-                          flex: "1 1 200px",
-                          maxWidth: "320px",
-                          margin: 0,
-                          alignSelf: "stretch",
+                          ...(isMobile
+                            ? { flex: "none", maxWidth: "none", width: "100%", margin: 0, alignSelf: "stretch" }
+                            : { flex: "1 1 200px", maxWidth: "320px", margin: 0, alignSelf: "stretch" }),
                         }}
                         onClick={() => handleGenerateVisual(true)}
                         disabled={
@@ -5862,7 +5901,7 @@ export default function Home() {
                       {sessionVisualGallery.length > 0 ? (
                         <div style={sessionGallerySectionStyle}>
                           <div style={sessionGalleryTitleStyle}>Варианты для этой концепции</div>
-                          <div style={sessionGalleryGridStyle}>
+                          <div className="osa-session-gallery-grid" style={sessionGalleryGridStyle}>
                             {sessionVisualGallery.map((item, index) => {
                               const isSel = selectedSessionVisual?.id === item.id;
                               return (
@@ -6031,6 +6070,7 @@ export default function Home() {
                             </div>
                           ) : null}
                           <textarea
+                            className="osa-form-textarea"
                             value={visualEditInstruction}
                             onChange={(e) => setVisualEditInstruction(e.target.value)}
                             placeholder="Например: убрать жёлтый оттенок, заменить кресло на более графичное, добавить белые фасады, сохранить композицию..."
@@ -6046,7 +6086,7 @@ export default function Home() {
                               ...primaryButton,
                               margin: 0,
                               padding: "12px 18px",
-                              fontSize: "14px",
+                              fontSize: isMobile ? "13px" : "14px",
                               borderRadius: "12px",
                               boxSizing: "border-box",
                               opacity: isImageRunning ? 0.65 : 1,
@@ -6171,7 +6211,7 @@ export default function Home() {
                         ...secondaryButton,
                         margin: 0,
                         padding: "10px 16px",
-                        fontSize: "14px",
+                        fontSize: isMobile ? "13px" : "14px",
                         borderRadius: "12px",
                         boxSizing: "border-box",
                       }}
@@ -6209,7 +6249,7 @@ export default function Home() {
                         ...primaryButton,
                         margin: "14px auto 0 auto",
                         padding: "12px 18px",
-                        fontSize: "14px",
+                        fontSize: isMobile ? "13px" : "14px",
                         borderRadius: "12px",
                         boxSizing: "border-box",
                       }}
@@ -6286,6 +6326,7 @@ export default function Home() {
               </div>
 
               <button
+                className="osa-primary-button"
                 style={actionButtonStyle}
                 onClick={handleAnalyzeImage}
                 disabled={isRunning || !selectedImagePreviewUrl || !selectedImageBase64}
@@ -6369,6 +6410,7 @@ export default function Home() {
                       semanticDraft={semanticDraft}
                       activeMode={selectedAnalysisMode}
                       isDark={isDark}
+                      isMobile={isMobile}
                       revealStyle={generateRevealStyle(isAnalyzeResultVisible)}
                       budgetDraft={activeBudgetDraft}
                       onCreateBudgetDraft={handleCreateBudgetDraft}
@@ -6399,11 +6441,11 @@ export default function Home() {
           )}
         </div>
         {!isAnalyzeMode ? (
-        <div style={statsRowWrapperStyle}>
-          <div style={statStyle} {...statCardLightHoverHandlers}>
+        <div className="osa-stats-row" style={statsRowWrapperStyle}>
+          <div className="osa-stat-card" style={statStyle} {...statCardLightHoverHandlers}>
             <div
               style={{
-                fontSize: "28px",
+                fontSize: isMobile ? "22px" : "28px",
                 fontWeight: "600",
                 marginBottom: "6px",
               }}
@@ -6412,7 +6454,7 @@ export default function Home() {
             </div>
             <div
               style={{
-                fontSize: "14px",
+                fontSize: isMobile ? "13px" : "14px",
                 lineHeight: "1.5",
                 color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.82)",
               }}
@@ -6421,10 +6463,10 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={statStyle} {...statCardLightHoverHandlers}>
+          <div className="osa-stat-card" style={statStyle} {...statCardLightHoverHandlers}>
             <div
               style={{
-                fontSize: "28px",
+                fontSize: isMobile ? "22px" : "28px",
                 fontWeight: "600",
                 marginBottom: "6px",
               }}
@@ -6433,7 +6475,7 @@ export default function Home() {
             </div>
             <div
               style={{
-                fontSize: "14px",
+                fontSize: isMobile ? "13px" : "14px",
                 lineHeight: "1.5",
                 color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.82)",
               }}
@@ -6442,10 +6484,10 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={statStyle} {...statCardLightHoverHandlers}>
+          <div className="osa-stat-card" style={statStyle} {...statCardLightHoverHandlers}>
             <div
               style={{
-                fontSize: "28px",
+                fontSize: isMobile ? "22px" : "28px",
                 fontWeight: "600",
                 marginBottom: "6px",
               }}
@@ -6454,7 +6496,7 @@ export default function Home() {
             </div>
             <div
               style={{
-                fontSize: "14px",
+                fontSize: isMobile ? "13px" : "14px",
                 lineHeight: "1.5",
                 color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.82)",
               }}
@@ -6467,13 +6509,18 @@ export default function Home() {
       </div>
           </div>
 
-          <aside style={rightContextAsideStyle} aria-label={isAnalyzeMode ? "Project Sidebar" : "Контекст проекта"}>
+          <aside
+            className="osa-workspace-sidebar-right"
+            style={rightContextAsideStyle}
+            aria-label={isAnalyzeMode ? "Project Sidebar" : "Контекст проекта"}
+          >
             {isAnalyzeMode ? (
               activeProjectKey ? (
                 <ProjectSidebar
                   semanticDraft={semanticDraft}
                   budgetDraft={activeBudgetDraft}
                   isDark={isDark}
+                  isMobile={isMobile}
                   isRunning={isAnalyzeLoading}
                   analysisDocumentSaved={analysisSaveStatus === "saved"}
                 />
@@ -6611,7 +6658,7 @@ export default function Home() {
                           width: "100%",
                           margin: 0,
                           padding: "11px 16px",
-                          fontSize: "14px",
+                          fontSize: isMobile ? "13px" : "14px",
                           borderRadius: "12px",
                           boxSizing: "border-box",
                         }}
@@ -6638,7 +6685,7 @@ export default function Home() {
                           width: "100%",
                           margin: 0,
                           padding: "11px 16px",
-                          fontSize: "14px",
+                          fontSize: isMobile ? "13px" : "14px",
                           borderRadius: "12px",
                           boxSizing: "border-box",
                         }}
@@ -6659,7 +6706,7 @@ export default function Home() {
                           width: "100%",
                           margin: 0,
                           padding: "11px 16px",
-                          fontSize: "14px",
+                          fontSize: isMobile ? "13px" : "14px",
                           borderRadius: "12px",
                           boxSizing: "border-box",
                           opacity: sessionContextAligned && sessionVisualGallery.length > 1 ? 1 : 0.45,

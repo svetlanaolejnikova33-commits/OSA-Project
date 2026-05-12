@@ -15,6 +15,7 @@ import { getConceptDNASummary } from "../../lib/styleConsistencyUtils";
 import { getSceneGraphSummary } from "../../lib/sceneGraphUtils";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { ProjectProgress } from "./ProjectProgress";
+import { ResponsiveSection } from "../ResponsiveSection";
 
 function sectionTitleStyle(isDark) {
   return {
@@ -31,7 +32,7 @@ function PaletteSwatches({ palette, isDark }) {
   const entries = [...(palette?.dominant || []), ...(palette?.accents || [])].slice(0, 8);
   if (!entries.length) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }} className="osa-palette-swatches">
       {entries.map((entry, index) => (
         <div
           key={`${entry.hex || "color"}-${index}`}
@@ -49,7 +50,14 @@ function PaletteSwatches({ palette, isDark }) {
   );
 }
 
-export function ProjectSidebar({ semanticDraft, budgetDraft, isDark, isRunning, analysisDocumentSaved }) {
+export function ProjectSidebar({
+  semanticDraft,
+  budgetDraft,
+  isDark,
+  isMobile = false,
+  isRunning,
+  analysisDocumentSaved,
+}) {
   const snapshot = getProjectSnapshot(semanticDraft);
   const palette = getSidebarPalette(semanticDraft);
   const materials = getMaterialHighlights(semanticDraft);
@@ -116,43 +124,54 @@ export function ProjectSidebar({ semanticDraft, budgetDraft, isDark, isRunning, 
         </div>
       </div>
 
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "4px" }}>Extracted palette</div>
-      {palette.dominant.length || palette.accents.length ? (
-        <>
-          <PaletteSwatches palette={palette} isDark={isDark} />
+      <ResponsiveSection
+        title="Extracted palette"
+        titleStyle={{ ...sectionTitleStyle(isDark), marginTop: "4px" }}
+        isMobile={isMobile}
+      >
+        {palette.dominant.length || palette.accents.length ? (
+          <>
+            <PaletteSwatches palette={palette} isDark={isDark} />
+            <div
+              style={{
+                marginTop: "8px",
+                marginBottom: "16px",
+                fontSize: "12px",
+                color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+              }}
+            >
+              {palette.source === "extracted" ? "Извлечена из изображения" : "Определена Vision"}
+            </div>
+          </>
+        ) : (
           <div
             style={{
-              marginTop: "8px",
               marginBottom: "16px",
-              fontSize: "12px",
+              fontSize: "13px",
+              lineHeight: 1.5,
               color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
             }}
           >
-            {palette.source === "extracted" ? "Извлечена из изображения" : "Определена Vision"}
+            Палитра появится после анализа.
           </div>
-        </>
-      ) : (
-        <div
-          style={{
-            marginBottom: "16px",
-            fontSize: "13px",
-            lineHeight: 1.5,
-            color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
-          }}
-        >
-          Палитра появится после анализа.
-        </div>
-      )}
+        )}
+      </ResponsiveSection>
 
-      <div style={sectionTitleStyle(isDark)}>Ключевые материалы</div>
-      <ProjectMaterials items={materials} isDark={isDark} />
+      <ResponsiveSection title="Ключевые материалы" titleStyle={sectionTitleStyle(isDark)} isMobile={isMobile}>
+        <ProjectMaterials items={materials} isDark={isDark} />
+      </ResponsiveSection>
 
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Потенциальные категории сметы</div>
-      <ProjectMaterials
-        items={categories}
-        isDark={isDark}
-        emptyLabel="Категории сметы появятся после SPEC-анализа."
-      />
+      <ResponsiveSection
+        title="Потенциальные категории сметы"
+        titleStyle={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}
+        isMobile={isMobile}
+      >
+        <ProjectMaterials
+          items={categories}
+          isDark={isDark}
+          emptyLabel="Категории сметы появятся после SPEC-анализа."
+        />
+      </ResponsiveSection>
 
       <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Concept DNA</div>
       <div

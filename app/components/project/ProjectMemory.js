@@ -61,7 +61,7 @@ function ModeBadges({ states, isDark }) {
   );
 }
 
-function SavedAnalysisRow({ row, active, isDark, previewUrl, onOpen }) {
+function SavedAnalysisRow({ row, active, isDark, isMobile, previewUrl, onOpen }) {
   const draft = row?.semanticDraft || null;
   const states = getAnalysisModeStates(draft);
   const title = row?.sourceImageName || row?.title || draft?.quickAnalysis?.spaceType?.labelRu || "Сцена";
@@ -72,7 +72,7 @@ function SavedAnalysisRow({ row, active, isDark, previewUrl, onOpen }) {
         gap: "12px",
         alignItems: "flex-start",
         width: "100%",
-        padding: "12px",
+        padding: isMobile ? "10px" : "12px",
         marginBottom: "8px",
         borderRadius: "16px",
         border: active
@@ -92,8 +92,8 @@ function SavedAnalysisRow({ row, active, isDark, previewUrl, onOpen }) {
     >
       <div
         style={{
-          width: "52px",
-          height: "52px",
+          width: isMobile ? "44px" : "52px",
+          height: isMobile ? "44px" : "52px",
           borderRadius: "12px",
           overflow: "hidden",
           flexShrink: 0,
@@ -199,6 +199,7 @@ export function ProjectMemory({
   activeSceneTimestamp,
   activeSemanticDraft,
   isDark,
+  isMobile = false,
   onOpenSavedRecord,
 }) {
   const [previewMap, setPreviewMap] = useState({});
@@ -287,13 +288,14 @@ export function ProjectMemory({
       </div>
 
       {Array.isArray(savedRecords) && savedRecords.length ? (
-        <div style={{ maxHeight: "min(58vh, 560px)", overflowY: "auto", paddingRight: "4px" }}>
+        <div style={{ maxHeight: isMobile ? "none" : "min(58vh, 560px)", overflowY: isMobile ? "visible" : "auto", paddingRight: "4px" }}>
           {savedRecords.map((row) => (
             <SavedAnalysisRow
               key={row.id}
               row={row}
               active={row.id === activeSavedRecordId}
               isDark={isDark}
+              isMobile={isMobile}
               previewUrl={previewMap[row.id]}
               onOpen={onOpenSavedRecord}
             />

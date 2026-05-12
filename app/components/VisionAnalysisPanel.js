@@ -126,22 +126,23 @@ function formatConfidence(value) {
   return `${Math.round(num * 100)}%`;
 }
 
-function Chips({ items, theme }) {
+function Chips({ items, theme, isMobile = false }) {
   if (!Array.isArray(items) || !items.length) return null;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
       {items.map((item) => (
         <span
           key={String(item)}
+          className="osa-chip"
           style={{
-            padding: "6px 10px",
+            padding: isMobile ? "5px 8px" : "6px 10px",
             borderRadius: "999px",
-            fontSize: "12px",
+            fontSize: isMobile ? "11px" : "12px",
             lineHeight: 1.25,
             border: `1px solid ${theme.chipBorder}`,
             background: theme.chipBackground,
             color: theme.chipText,
-            whiteSpace: "nowrap",
+            whiteSpace: isMobile ? "normal" : "nowrap",
           }}
         >
           {item}
@@ -154,7 +155,7 @@ function Chips({ items, theme }) {
 function PaletteSwatches({ entries, theme }) {
   if (!Array.isArray(entries) || !entries.length) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+    <div className="osa-palette-swatches" style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
       {entries.map((entry, index) => {
         const key = `${entry.hex || "text"}-${entry.labelRu || index}`;
         const label = (entry.labelRu || entry.hex || "цвет").slice(0, 18);
@@ -895,10 +896,21 @@ function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text }) {
   );
 }
 
+function withMobileTheme(theme, isMobile) {
+  if (!isMobile) return theme;
+  return {
+    ...theme,
+    panelPadding: "10px",
+    cardPadding: "10px",
+    sectionGap: "8px",
+  };
+}
+
 export function VisionAnalysisPanel({
   semanticDraft,
   activeMode,
   isDark,
+  isMobile = false,
   revealStyle,
   budgetDraft,
   onCreateBudgetDraft,
@@ -914,7 +926,7 @@ export function VisionAnalysisPanel({
   if (!semanticDraft) return null;
 
   const analysisMode = normalizeAnalysisMode(activeMode || semanticDraft.analysisMode);
-  const theme = getSafeAnalysisTheme(semanticDraft, isDark, analysisMode);
+  const theme = withMobileTheme(getSafeAnalysisTheme(semanticDraft, isDark, analysisMode), isMobile);
   const text = valueStyle(theme);
 
   if (!hasSemanticDraftForMode(semanticDraft, analysisMode)) {
@@ -935,6 +947,7 @@ export function VisionAnalysisPanel({
   if (analysisMode === "quick") {
     return (
       <div
+        className="osa-analysis-panel"
         style={{
           ...revealStyle,
           width: "100%",
@@ -968,7 +981,7 @@ export function VisionAnalysisPanel({
               {formatConfidence(quick.styleAnalysis.confidence) ? ` · ${formatConfidence(quick.styleAnalysis.confidence)}` : ""}
             </div>
             {Array.isArray(quick.styleAnalysis.secondary) && quick.styleAnalysis.secondary.length ? (
-              <Chips items={quick.styleAnalysis.secondary} theme={theme} />
+              <Chips items={quick.styleAnalysis.secondary} theme={theme} isMobile={isMobile} />
             ) : null}
           </Section>
         ) : null}
@@ -993,6 +1006,7 @@ export function VisionAnalysisPanel({
   if (analysisMode === "pro") {
     return (
       <div
+        className="osa-analysis-panel"
         style={{
           ...revealStyle,
           width: "100%",
@@ -1055,7 +1069,7 @@ export function VisionAnalysisPanel({
               <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary }}>{pro.designIntent.emotionalEffectRu}</div>
             ) : null}
             {Array.isArray(pro.designIntent.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length ? (
-              <Chips items={pro.designIntent.keyDesignDrivers} theme={theme} />
+              <Chips items={pro.designIntent.keyDesignDrivers} theme={theme} isMobile={isMobile} />
             ) : null}
           </Section>
         ) : null}
@@ -1097,7 +1111,7 @@ export function VisionAnalysisPanel({
               <div style={{ ...text, marginBottom: "8px" }}>{pro.lightingAnalysis.overallLightingMood}</div>
             ) : null}
             {Array.isArray(pro.lightingAnalysis.technicalNotes) && pro.lightingAnalysis.technicalNotes.length ? (
-              <Chips items={pro.lightingAnalysis.technicalNotes} theme={theme} />
+              <Chips items={pro.lightingAnalysis.technicalNotes} theme={theme} isMobile={isMobile} />
             ) : null}
           </Section>
         ) : null}
@@ -1199,7 +1213,7 @@ export function VisionAnalysisPanel({
         ) : null}
         {Array.isArray(pro.designIntent?.whatMustBePreserved) && pro.designIntent.whatMustBePreserved.length ? (
           <Section label="Что важно сохранить" theme={theme}>
-            <Chips items={pro.designIntent.whatMustBePreserved} theme={theme} />
+            <Chips items={pro.designIntent.whatMustBePreserved} theme={theme} isMobile={isMobile} />
           </Section>
         ) : null}
         <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} />
@@ -1226,6 +1240,7 @@ export function VisionAnalysisPanel({
 
   return (
     <div
+      className="osa-analysis-panel"
       style={{
         ...revealStyle,
         width: "100%",
@@ -1332,12 +1347,12 @@ export function VisionAnalysisPanel({
       ) : null}
       {Array.isArray(spec.procurementNotes) && spec.procurementNotes.length ? (
         <Section label="Заметки для SKU" theme={theme}>
-          <Chips items={spec.procurementNotes} theme={theme} />
+          <Chips items={spec.procurementNotes} theme={theme} isMobile={isMobile} />
         </Section>
       ) : null}
       {Array.isArray(spec.whatMustBePreserved) && spec.whatMustBePreserved.length ? (
         <Section label="Что важно сохранить" theme={theme}>
-          <Chips items={spec.whatMustBePreserved} theme={theme} />
+          <Chips items={spec.whatMustBePreserved} theme={theme} isMobile={isMobile} />
         </Section>
       ) : null}
       <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} />
