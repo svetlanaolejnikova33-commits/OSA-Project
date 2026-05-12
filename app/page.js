@@ -12,8 +12,19 @@ import {
   getLatestSemanticAnalysis,
   getAllSemanticAnalysesFromDB,
 } from "./lib/imageStore";
-import { runMockSemanticAnalysis } from "./lib/semanticAnalysisService";
-import { SemanticAnalysisCards } from "./components/SemanticAnalysisCards";
+import {
+  ANALYSIS_MODES,
+  ANALYSIS_MODE_LABELS_RU,
+  hasSemanticAnalysis,
+  hasSemanticDraftForMode,
+  normalizeAnalysisMode,
+  validateSemanticDraft,
+} from "./lib/validateSemanticDraft";
+import { extractImagePalette } from "./lib/extractImagePalette";
+import { VisionAnalysisPanel } from "./components/VisionAnalysisPanel";
+import { AnalysisQualityCheckPanel } from "./components/AnalysisQualityCheckPanel";
+import { ProjectMemory } from "./components/project/ProjectMemory";
+import { ProjectSidebar } from "./components/project/ProjectSidebar";
 import {
   normalizeSemanticDraft,
   createSemanticDraftFromPrompt,
@@ -21,6 +32,23 @@ import {
   extractPossibleProductCategories,
 } from "./lib/visualParsingService";
 import { appendEditRequest, patchEditRequest } from "./lib/editRequestsStore";
+import {
+  getAnalysisRecordById,
+  getBudgetDraftForAnalysisRecord,
+  readAnalysisRecordsForProject,
+  relinkBudgetDraftsFromPending,
+  upsertAnalysisRecord,
+  upsertBudgetDraft,
+} from "./lib/analysisDocumentsStore";
+import { mapSpecToSupplierRegistry } from "./lib/mapSpecToSupplierRegistry";
+import { matchSpecGroupsToSuppliers } from "./lib/matchSpecGroupsToSuppliers";
+import { attachBudgetContextToMutations } from "./lib/designMutationUtils";
+import {
+  applyGenerationPackageReadiness,
+  createGenerationPackageFromMutation,
+} from "./lib/generationPackageUtils";
+import { attachRelatedEditableObjectsToSpecGroups } from "./lib/editableObjectsUtils";
+import { attachRelatedSceneObjectsToSpecGroups } from "./lib/sceneGraphUtils";
 
 /** Atmosphere modes (image API + badges). English labels as design system. */
 const ATMOSPHERE_KEYS = [
@@ -69,6 +97,7 @@ const IT_VARIATION = "variation";
 const IT_TEXT_EDIT_MOCK = "text_edit_mock";
 const IT_IMAGE_EDIT = "image_edit";
 const IT_SKU_REPLACE_PENDING = "sku_replace_pending";
+const IT_CONTROLLED_REGENERATION = "controlled_regeneration";
 
 function migrateIterationTypeStored(raw) {
   if (!raw || typeof raw !== "string") return "";
@@ -86,6 +115,7 @@ function deriveIterationLabelFrom(meta) {
   if (it === IT_TEXT_EDIT_MOCK) return "ПРАВКА";
   if (it === IT_IMAGE_EDIT) return "ТОЧНАЯ ПРАВКА";
   if (it === IT_SKU_REPLACE_PENDING) return "ЗАМЕНА";
+  if (it === IT_CONTROLLED_REGENERATION) return "CONTROLLED";
   return "";
 }
 
@@ -100,6 +130,7 @@ function visualIterationBadgeText(item) {
   if (it === IT_TEXT_EDIT_MOCK) return "ПРАВКА";
   if (it === IT_IMAGE_EDIT) return "ТОЧНАЯ ПРАВКА";
   if (it === IT_SKU_REPLACE_PENDING) return "ЗАМЕНА";
+  if (it === IT_CONTROLLED_REGENERATION) return "CONTROLLED";
   if (item.variationLabel) return item.variationLabel;
   if (item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]) {
     return ALTERNATE_KIND_LABEL_RU[item.alternateKind];
@@ -648,6 +679,28 @@ function newStableId() {
     : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+function buildAnalysisRecordTitle(semanticDraft, fileName) {
+  const room =
+    semanticDraft?.quickAnalysis?.spaceType?.labelRu ||
+    semanticDraft?.proAnalysis?.spaceType?.labelRu ||
+    "";
+  const imageName = typeof fileName === "string" ? fileName.trim() : "";
+  if (room && imageName) return `${room} · ${imageName}`;
+  return room || imageName || "Сохранённый анализ";
+}
+
+function buildAnalysisDocumentFingerprint({ semanticDraft, activeMode, sourceImageId }) {
+  const completedModes = Array.isArray(semanticDraft?.completedAnalysisModes)
+    ? [...semanticDraft.completedAnalysisModes].sort()
+    : [];
+  return JSON.stringify({
+    activeMode: normalizeAnalysisMode(activeMode),
+    sourceImageId: typeof sourceImageId === "string" ? sourceImageId : "",
+    completedModes,
+    semanticDraft,
+  });
+}
+
 function normalizePalette(p) {
   if (!p || typeof p !== "object") {
     return { base: "", accent: "", contrast: "" };
@@ -727,6 +780,30 @@ function normalizeSavedVisual(item) {
       : typeof item.editInstruction === "string" && item.editInstruction.trim()
         ? item.editInstruction.trim()
         : "";
+  const rootVisualIdRaw = item.rootVisualId;
+  const rootVisualId =
+    typeof rootVisualIdRaw === "string" && rootVisualIdRaw.trim() ? rootVisualIdRaw.trim() : null;
+  const generationPackageIdRaw = item.generationPackageId ?? item.sourceGenerationPackageId;
+  const generationPackageId =
+    typeof generationPackageIdRaw === "string" && generationPackageIdRaw.trim()
+      ? generationPackageIdRaw.trim()
+      : null;
+  const analysisRecordIdRaw = item.analysisRecordId ?? item.sourceAnalysisId;
+  const analysisRecordId =
+    typeof analysisRecordIdRaw === "string" && analysisRecordIdRaw.trim()
+      ? analysisRecordIdRaw.trim()
+      : null;
+  const iterationDepthRaw = item.iterationDepth;
+  const iterationDepth =
+    typeof iterationDepthRaw === "number" && Number.isFinite(iterationDepthRaw)
+      ? Math.max(0, Math.floor(iterationDepthRaw))
+      : null;
+  const preserveRules = Array.isArray(item.preserveRules) ? item.preserveRules : [];
+  const changeTargets = Array.isArray(item.changeTargets) ? item.changeTargets : [];
+  const semanticDraftSummary =
+    typeof item.semanticDraftSummary === "string" ? item.semanticDraftSummary : "";
+  const semanticDraftSnapshotId =
+    typeof item.semanticDraftSnapshotId === "string" ? item.semanticDraftSnapshotId : "";
   return {
     id: String(item.id),
     imageBase64: legacyB64 ? item.imageBase64 : "",
@@ -754,6 +831,16 @@ function normalizeSavedVisual(item) {
     createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
     alternateKind,
     imageStored: imageStored || legacyB64,
+    rootVisualId,
+    generationPackageId,
+    sourceGenerationPackageId: generationPackageId,
+    analysisRecordId,
+    sourceAnalysisId: analysisRecordId,
+    iterationDepth,
+    preserveRules,
+    changeTargets,
+    semanticDraftSummary,
+    semanticDraftSnapshotId,
   };
 }
 
@@ -793,6 +880,40 @@ function visualToLocalStorageRecord(v) {
       typeof v.alternateKind === "string" && ALTERNATE_KIND_KEYS.includes(v.alternateKind)
         ? v.alternateKind
         : null,
+    rootVisualId: typeof v.rootVisualId === "string" ? v.rootVisualId : null,
+    generationPackageId:
+      typeof v.generationPackageId === "string"
+        ? v.generationPackageId
+        : typeof v.sourceGenerationPackageId === "string"
+          ? v.sourceGenerationPackageId
+          : null,
+    sourceGenerationPackageId:
+      typeof v.sourceGenerationPackageId === "string"
+        ? v.sourceGenerationPackageId
+        : typeof v.generationPackageId === "string"
+          ? v.generationPackageId
+          : null,
+    analysisRecordId:
+      typeof v.analysisRecordId === "string"
+        ? v.analysisRecordId
+        : typeof v.sourceAnalysisId === "string"
+          ? v.sourceAnalysisId
+          : null,
+    sourceAnalysisId:
+      typeof v.sourceAnalysisId === "string"
+        ? v.sourceAnalysisId
+        : typeof v.analysisRecordId === "string"
+          ? v.analysisRecordId
+          : null,
+    iterationDepth:
+      typeof v.iterationDepth === "number" && Number.isFinite(v.iterationDepth)
+        ? Math.max(0, Math.floor(v.iterationDepth))
+        : null,
+    preserveRules: Array.isArray(v.preserveRules) ? v.preserveRules : [],
+    changeTargets: Array.isArray(v.changeTargets) ? v.changeTargets : [],
+    semanticDraftSummary: typeof v.semanticDraftSummary === "string" ? v.semanticDraftSummary : "",
+    semanticDraftSnapshotId:
+      typeof v.semanticDraftSnapshotId === "string" ? v.semanticDraftSnapshotId : "",
     imageStored: true,
   };
 }
@@ -1251,7 +1372,10 @@ export default function Home() {
   const [isImageVisible, setIsImageVisible] = useState(false);
   const [showImagePromptDetails, setShowImagePromptDetails] = useState(false);
   const [savedVisuals, setSavedVisuals] = useState([]);
-  const [analyzeImageResult, setAnalyzeImageResult] = useState(null);
+  const [semanticDraft, setSemanticDraft] = useState(null);
+  const [selectedAnalysisMode, setSelectedAnalysisMode] = useState("pro");
+  const [resultAnalysisMode, setResultAnalysisMode] = useState("");
+  const [analyzeSceneError, setAnalyzeSceneError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [isGenerateResultVisible, setIsGenerateResultVisible] = useState(false);
   const [isAnalyzeResultVisible, setIsAnalyzeResultVisible] = useState(false);
@@ -1262,7 +1386,14 @@ export default function Home() {
   const [selectedImageDimensions, setSelectedImageDimensions] = useState({ width: 0, height: 0 });
   const [selectedImageBase64, setSelectedImageBase64] = useState("");
   const [selectedImageId, setSelectedImageId] = useState("");
+  const [activeAnalysisRecordId, setActiveAnalysisRecordId] = useState("");
   const [analyzeHistory, setAnalyzeHistory] = useState([]);
+  const [savedAnalysisRecords, setSavedAnalysisRecords] = useState([]);
+  const [activeSavedAnalysisRecordId, setActiveSavedAnalysisRecordId] = useState("");
+  const [savedDocumentSnapshot, setSavedDocumentSnapshot] = useState("");
+  const [documentStoreVersion, setDocumentStoreVersion] = useState(0);
+  const [budgetDraftsVersion, setBudgetDraftsVersion] = useState(0);
+  const [devAnalysisScenarioType, setDevAnalysisScenarioType] = useState("");
   const [isAnalyzeDropActive, setIsAnalyzeDropActive] = useState(false);
   const [activeProjectKey, setActiveProjectKey] = useState(null);
   const [atmosphereChoice, setAtmosphereChoice] = useState("architectural_white");
@@ -1278,6 +1409,9 @@ export default function Home() {
   const [promptSaveNotice, setPromptSaveNotice] = useState("");
   const [activePromptVersionId, setActivePromptVersionIdState] = useState(null);
   const [promptHistoryOpen, setPromptHistoryOpen] = useState(false);
+  const [isControlledRegenerating, setIsControlledRegenerating] = useState(false);
+  const [controlledRegenerationError, setControlledRegenerationError] = useState("");
+  const [controlledRegenerationResult, setControlledRegenerationResult] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 180);
@@ -1427,11 +1561,23 @@ export default function Home() {
     const fileName = typeof record.fileName === "string" ? record.fileName : "";
     const width = Number.isFinite(record.width) ? record.width : 0;
     const height = Number.isFinite(record.height) ? record.height : 0;
+    setActiveSavedAnalysisRecordId("");
+    setSavedDocumentSnapshot("");
     setSelectedImageFileName(fileName);
     setSelectedImageMimeType(mimeType);
     setSelectedImageDimensions({ width, height });
     setSelectedImageId(imageId);
-    setAnalyzeImageResult(record.result || null);
+    setActiveAnalysisRecordId(typeof record.id === "string" ? record.id : "");
+    const restoredDraft = validateSemanticDraft(record.semanticDraft || record.result || null, {
+      languageMode: record?.semanticDraft?.languageMode || record?.result?.languageMode || "ru",
+    });
+    const restoredResultMode = normalizeAnalysisMode(
+      restoredDraft.resultAnalysisMode || restoredDraft.analysisMode || selectedAnalysisMode
+    );
+    setSelectedAnalysisMode(restoredResultMode);
+    setResultAnalysisMode(restoredResultMode);
+    setSemanticDraft(restoredDraft);
+    setAnalyzeSceneError("");
     setIsAnalyzeResultVisible(false);
     window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
 
@@ -1447,6 +1593,437 @@ export default function Home() {
       }
     }
   };
+
+  const openSavedAnalysisDocument = async (record) => {
+    if (!record) return;
+    const restoredDraft = validateSemanticDraft(record.semanticDraft || null, {
+      languageMode: record?.semanticDraft?.languageMode || "ru",
+    });
+    const restoredMode = normalizeAnalysisMode(
+      record.activeMode || restoredDraft.resultAnalysisMode || restoredDraft.analysisMode || selectedAnalysisMode
+    );
+    const imageId = typeof record.sourceImageId === "string" ? record.sourceImageId : "";
+    const mimeType =
+      typeof record.sourceImageMimeType === "string" ? record.sourceImageMimeType : "image/png";
+    const fileName = typeof record.sourceImageName === "string" ? record.sourceImageName : "";
+
+    setActiveSavedAnalysisRecordId(typeof record.id === "string" ? record.id : "");
+    setSavedDocumentSnapshot(
+      buildAnalysisDocumentFingerprint({
+        semanticDraft: restoredDraft,
+        activeMode: restoredMode,
+        sourceImageId: imageId,
+      })
+    );
+    setSelectedAnalysisMode(restoredMode);
+    setResultAnalysisMode(restoredMode);
+    setSemanticDraft(restoredDraft);
+    setAnalyzeSceneError("");
+    setIsAnalyzeResultVisible(false);
+    setSelectedImageFileName(fileName);
+    setSelectedImageMimeType(mimeType);
+    setSelectedImageId(imageId);
+    setActiveAnalysisRecordId("");
+    window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+
+    if (imageId && isIndexedDbAvailable()) {
+      try {
+        const b64 = (await getImageFromDB(imageId)) || "";
+        setSelectedImageBase64(b64);
+        if (b64 && mimeType) {
+          setSelectedImagePreviewUrl(`data:${mimeType};base64,${b64}`);
+        }
+      } catch (e) {
+        console.warn("OSA: failed to restore saved analysis image:", e);
+      }
+    }
+  };
+
+  const handleSaveAnalysisDocument = () => {
+    if (!semanticDraft || !activeProjectKey) return;
+    const now = new Date().toISOString();
+    const existing = activeSavedAnalysisRecordId ? getAnalysisRecordById(activeSavedAnalysisRecordId) : null;
+    const recordId = existing?.id || newStableId();
+    const sourceImageId = selectedImageId || existing?.sourceImageId || "";
+    const record = {
+      id: recordId,
+      projectKey: activeProjectKey,
+      sourceImageId,
+      sourceImageName: selectedImageFileName || existing?.sourceImageName || "",
+      sourceImageMimeType: selectedImageMimeType || existing?.sourceImageMimeType || "image/png",
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      activeMode: selectedAnalysisMode,
+      completedModes: Array.isArray(semanticDraft.completedAnalysisModes)
+        ? semanticDraft.completedAnalysisModes
+        : [],
+      semanticDraft,
+      title: buildAnalysisRecordTitle(semanticDraft, selectedImageFileName),
+      status: "saved",
+    };
+    upsertAnalysisRecord(record);
+    if (sourceImageId) {
+      relinkBudgetDraftsFromPending(`pending:${sourceImageId}`, recordId);
+    }
+    setActiveSavedAnalysisRecordId(recordId);
+    setSavedDocumentSnapshot(
+      buildAnalysisDocumentFingerprint({
+        semanticDraft,
+        activeMode: selectedAnalysisMode,
+        sourceImageId,
+      })
+    );
+    setDocumentStoreVersion((value) => value + 1);
+  };
+
+  const handlePrepareGenerationPackage = (mutation) => {
+    if (!semanticDraft || !mutation) return;
+    const created = createGenerationPackageFromMutation(mutation, semanticDraft, {
+      projectKey: activeProjectKey || "",
+      sourceImageId: selectedImageId || "",
+      sourceAnalysisId:
+        activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : ""),
+    });
+    if (!created) return;
+    const readyPackage = applyGenerationPackageReadiness(created, {
+      sourceImageId: selectedImageId || "",
+      sourceImageBase64: selectedImageBase64 || "",
+    });
+    const existing = Array.isArray(semanticDraft.generationPackages) ? semanticDraft.generationPackages : [];
+    const rest = existing.filter((entry) => entry.sourceMutationId !== readyPackage.sourceMutationId);
+    setSemanticDraft(
+      validateSemanticDraft({
+        ...semanticDraft,
+        generationPackages: [...rest, readyPackage],
+      })
+    );
+  };
+
+  const patchGenerationPackageInDraft = (packageId, patch) => {
+    if (!packageId) return;
+    setSemanticDraft((prev) =>
+      prev
+        ? validateSemanticDraft({
+            ...prev,
+            generationPackages: (prev.generationPackages || []).map((entry) =>
+              entry.id === packageId ? { ...entry, ...patch } : entry
+            ),
+          })
+        : prev
+    );
+  };
+
+  const handleControlledRegenerate = async (generationPackage) => {
+    if (!generationPackage || isControlledRegenerating || isRunning) return;
+    const projectKey = activeProjectKey;
+    if (!projectKey) {
+      setControlledRegenerationError("Сначала создайте или выберите проект.");
+      return;
+    }
+
+    const readiness = applyGenerationPackageReadiness(generationPackage, {
+      sourceImageId: selectedImageId || generationPackage.sourceImageId || "",
+      sourceImageBase64: selectedImageBase64 || "",
+    });
+    if (!readiness?.readyForGeneration) {
+      const reasonText = (readiness?.readinessReasons || []).join("; ") || "пакет не готов";
+      setControlledRegenerationError(reasonText);
+      setControlledRegenerationResult(null);
+      return;
+    }
+
+    let sourceImageBase64 = selectedImageBase64 || "";
+    const parentVisualId =
+      (typeof readiness.sourceImageId === "string" && readiness.sourceImageId.trim()
+        ? readiness.sourceImageId.trim()
+        : "") ||
+      selectedImageId ||
+      (typeof readiness.id === "string" && readiness.id.trim() ? readiness.id.trim() : "") ||
+      newStableId();
+    if (!sourceImageBase64 && parentVisualId && isIndexedDbAvailable()) {
+      try {
+        sourceImageBase64 = (await getImageFromDB(parentVisualId)) || "";
+      } catch {
+        sourceImageBase64 = "";
+      }
+    }
+    if (!sourceImageBase64) {
+      const parentVisual = sessionVisualGallery.find((entry) => entry.id === parentVisualId);
+      sourceImageBase64 = parentVisual?.imageBase64 || "";
+    }
+    if (!sourceImageBase64) {
+      setControlledRegenerationError("нет исходного изображения");
+      return;
+    }
+
+    setControlledRegenerationError("");
+    setControlledRegenerationResult(null);
+    setIsControlledRegenerating(true);
+    patchGenerationPackageInDraft(readiness.id, { status: "generating", readyForGeneration: false });
+
+    try {
+      const response = await fetch("/api/controlled-regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectKey,
+          sourceImageBase64,
+          generationPackage: readiness,
+          semanticDraft,
+          mode: "image_to_image",
+          parentImageId: parentVisualId,
+        }),
+      });
+
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = {};
+      }
+
+      const nextB64 =
+        payload.ok === true && typeof payload.imageBase64 === "string" ? payload.imageBase64.trim() : "";
+      const succeeded = response.ok && payload.ok === true && nextB64;
+      if (!succeeded) {
+        let notice = "Не удалось создать controlled-итерацию. Попробуйте позже.";
+        const errTxt = typeof payload.error === "string" && payload.error.trim() ? payload.error.trim() : "";
+        if (errTxt.includes("OPENAI_API_KEY")) {
+          notice =
+            "На сервере не настроен OPENAI_API_KEY. Добавьте ключ в окружение (например .env.local) и перезапустите приложение.";
+        } else if (/billing|quota|insufficient/i.test(errTxt)) {
+          notice = "Лимит или биллинг OpenAI исчерпан. Проверьте квоту и способ оплаты в аккаунте OpenAI.";
+        } else if (errTxt.length > 0 && errTxt.length < 420) {
+          notice = errTxt.endsWith(".") ? errTxt : `${errTxt}.`;
+        }
+        patchGenerationPackageInDraft(readiness.id, { status: "failed", readyForGeneration: false });
+        setControlledRegenerationError(notice);
+        return;
+      }
+
+      const parentVisual = sessionVisualGallery.find((entry) => entry.id === parentVisualId) || null;
+      const rootVisualId = parentVisual?.rootVisualId || parentVisualId;
+      const iterationDepth =
+        typeof parentVisual?.iterationDepth === "number" ? parentVisual.iterationDepth + 1 : 1;
+      const mutation =
+        (semanticDraft.designMutations || []).find((entry) => entry.id === readiness.sourceMutationId) || null;
+      const analysisRecordId =
+        activeSavedAnalysisRecordId ||
+        readiness.sourceAnalysisId ||
+        (selectedImageId ? `pending:${selectedImageId}` : "");
+      const semanticDraftSnapshotId = analysisRecordId || "";
+      const semanticDraftSummary = mutation?.labelRu || readiness.goalRu || "Controlled regeneration";
+      const createdAt = new Date().toISOString();
+      const newVisualId = newStableId();
+      const promptUsed =
+        typeof payload.metadata?.promptUsed === "string" && payload.metadata.promptUsed.trim()
+          ? payload.metadata.promptUsed.trim()
+          : `[${payload.model || "gpt-image-1"} controlled regeneration]\n${readiness.promptRu || readiness.promptEn || ""}`;
+
+      const newVisual = {
+        id: newVisualId,
+        parentVisualId,
+        rootVisualId,
+        generationPackageId: readiness.id,
+        sourceGenerationPackageId: readiness.id,
+        analysisRecordId,
+        sourceAnalysisId: analysisRecordId,
+        iterationDepth,
+        imageBase64: nextB64,
+        iterationType: IT_CONTROLLED_REGENERATION,
+        iterationLabel: "CONTROLLED",
+        variationLabel: "CONTROLLED",
+        title: mutation?.labelRu || readiness.goalRu || "Controlled iteration",
+        promptUsed,
+        preserveRules: readiness.preserveRules || [],
+        changeTargets: readiness.changeTargets || [],
+        createdAt,
+        semanticDraftSnapshotId,
+        semanticDraftSummary,
+        projectKey,
+        sourceImageId: parentVisualId,
+        sourceImageBase64Available: true,
+      };
+
+      setSessionVisualGallery((prev) => {
+        const hasParent = prev.some((entry) => entry.id === parentVisualId);
+        const parentSeed = hasParent
+          ? []
+          : [
+              {
+                id: parentVisualId,
+                imageBase64: sourceImageBase64,
+                iterationType: IT_BASE_GENERATION,
+                iterationLabel: "ОСНОВНОЙ",
+                title: selectedImageFileName || "Исходная сцена",
+                projectKey,
+                createdAt,
+                rootVisualId: parentVisualId,
+                iterationDepth: 0,
+                sourceImageId: parentVisualId,
+                imageStored: true,
+              },
+            ];
+        return [...prev, ...parentSeed, newVisual];
+      });
+      setSelectedSessionVisualId(newVisualId);
+      setMode("generate");
+      setIsImageVisible(true);
+
+      patchGenerationPackageInDraft(readiness.id, {
+        status: "completed",
+        readyForGeneration: false,
+        resultVisualId: newVisualId,
+        analyzedAfterRegeneration: false,
+      });
+
+      setControlledRegenerationResult({
+        visualId: newVisualId,
+        parentVisualId,
+        mutationLabel: mutation?.labelRu || readiness.goalRu || "",
+        preserveRules: readiness.preserveRules || [],
+        changeTargets: readiness.changeTargets || [],
+        status: "completed",
+        packageId: readiness.id,
+      });
+
+      const persistItem = normalizeSavedVisual({ ...newVisual, imageStored: true });
+      if (!persistItem) {
+        console.error("OSA: failed to normalize controlled-regeneration visual for storage");
+      } else if (!isIndexedDbAvailable()) {
+        setImageError(
+          "IndexedDB недоступна — controlled-итерация не будет сохранена после перезагрузки."
+        );
+      } else {
+        try {
+          await saveImageToDB(persistItem.id, nextB64);
+          setSavedVisuals((prev) => {
+            const next = [persistItem, ...prev.filter((entry) => entry.id !== persistItem.id)];
+            persistVisualHistoryRecords(next);
+            return next;
+          });
+        } catch (err) {
+          console.error(err);
+          setImageError(
+            "Не удалось сохранить controlled-итерацию в IndexedDB. Визуал виден только до перезагрузки страницы."
+          );
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      patchGenerationPackageInDraft(readiness.id, { status: "failed", readyForGeneration: false });
+      setControlledRegenerationError("Не удалось создать controlled-итерацию. Попробуйте позже.");
+    } finally {
+      setIsControlledRegenerating(false);
+    }
+  };
+
+  const handleAnalyzeControlledVisual = async (visualId) => {
+    const visual =
+      sessionVisualGallery.find((entry) => entry.id === visualId) ||
+      savedVisuals.find((entry) => entry.id === visualId) ||
+      null;
+    if (!visual) return;
+
+    let imageBase64 = visual.imageBase64 || "";
+    if (!imageBase64 && isIndexedDbAvailable()) {
+      try {
+        imageBase64 = (await getImageFromDB(visual.id)) || "";
+      } catch {
+        imageBase64 = "";
+      }
+    }
+    if (!imageBase64) {
+      setControlledRegenerationError("Не удалось загрузить controlled-итерацию для анализа.");
+      return;
+    }
+
+    if (selectedImagePreviewUrl && selectedImagePreviewUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(selectedImagePreviewUrl);
+    }
+    const mime = selectedImageMimeType || "image/png";
+    setSelectedImageBase64(imageBase64);
+    setSelectedImagePreviewUrl(`data:${mime};base64,${imageBase64}`);
+    setSelectedImageId(visual.id);
+    setSelectedImageFileName(visual.title || "controlled-iteration.png");
+    setMode("analyze");
+    setControlledRegenerationError("");
+    await handleAnalyzeImage();
+
+    if (semanticDraft && visual.generationPackageId) {
+      setSemanticDraft((prev) =>
+        prev
+          ? validateSemanticDraft({
+              ...prev,
+              generationPackages: (prev.generationPackages || []).map((entry) =>
+                entry.id === visual.generationPackageId || entry.resultVisualId === visual.id
+                  ? { ...entry, analyzedAfterRegeneration: true }
+                  : entry
+              ),
+            })
+          : prev
+      );
+    }
+  };
+
+  const handleCreateBudgetDraft = () => {
+    if (!activeProjectKey || !semanticDraft?.specAnalysis) return;
+    const linkageId =
+      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
+    if (!linkageId) return;
+    if (getBudgetDraftForAnalysisRecord(linkageId)) {
+      setBudgetDraftsVersion((value) => value + 1);
+      return;
+    }
+    const groups = Array.isArray(semanticDraft.specAnalysis.specificationGroups)
+      ? semanticDraft.specAnalysis.specificationGroups
+      : [];
+    const { normalizedSpecGroups } = mapSpecToSupplierRegistry({
+      specAnalysis: semanticDraft.specAnalysis,
+      specificationGroups: groups,
+      productCategories: semanticDraft.specAnalysis.productCategories,
+      supplierCategories: semanticDraft.specAnalysis.supplierCategories,
+    });
+    const { normalizedSpecGroups: enrichedSpecGroups } = matchSpecGroupsToSuppliers({
+      normalizedSpecGroups,
+    });
+    const normalizedWithSceneObjects = attachRelatedSceneObjectsToSpecGroups(
+      enrichedSpecGroups,
+      semanticDraft.sceneGraph
+    );
+    const normalizedWithEditableObjects = attachRelatedEditableObjectsToSpecGroups(
+      normalizedWithSceneObjects,
+      semanticDraft.editableObjects
+    );
+    const designMutationsSnapshot = attachBudgetContextToMutations(
+      semanticDraft.designMutations || [],
+      { normalizedSpecGroups: normalizedWithEditableObjects }
+    );
+    upsertBudgetDraft({
+      id: newStableId(),
+      projectKey: activeProjectKey,
+      analysisRecordId: linkageId,
+      createdAt: new Date().toISOString(),
+      status: "draft",
+      source: "specAnalysis",
+      groups,
+      normalizedSpecGroups: normalizedWithEditableObjects,
+      sceneGraphSnapshot: semanticDraft.sceneGraph || null,
+      editableObjectsSnapshot: semanticDraft.editableObjects || [],
+      styleConsistencySnapshot: semanticDraft.styleConsistency || null,
+      designMutationsSnapshot,
+      note: "Черновая структура сметы без цен и SKU",
+    });
+    setBudgetDraftsVersion((value) => value + 1);
+  };
+
+  useEffect(() => {
+    if (!activeProjectKey) {
+      setSavedAnalysisRecords([]);
+      return;
+    }
+    setSavedAnalysisRecords(readAnalysisRecordsForProject(activeProjectKey));
+  }, [activeProjectKey, documentStoreVersion]);
 
   useEffect(() => {
     if (!activeProjectKey) return;
@@ -1917,6 +2494,9 @@ export default function Home() {
   const workspaceCenterColumnStyle = {
     minWidth: 0,
     width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: isAnalyzeMode ? "center" : "stretch",
   };
 
   const panelStyle = {
@@ -2191,16 +2771,16 @@ export default function Home() {
   };
 
   const workspaceCardStyle = {
-    maxWidth: "760px",
+    maxWidth: isAnalyzeMode ? "min(1080px, 100%)" : "760px",
     width: "100%",
     margin: "28px auto 48px auto",
     borderRadius: "22px",
-    padding: "22px 20px",
+    padding: isAnalyzeMode ? "18px 16px" : "22px 20px",
     textAlign: "center",
     boxSizing: "border-box",
     display: "flex",
     flexDirection: "column",
-    alignItems: "stretch",
+    alignItems: isAnalyzeMode ? "center" : "stretch",
     ...(workspaceProjectPalette
       ? {
           background: isDark
@@ -2261,6 +2841,19 @@ export default function Home() {
       : "0 8px 24px rgba(0,0,0,0.05), 0 1px 20px rgba(160,150,190,0.08), inset 0 1px 0 rgba(255,255,255,0.55)",
     backdropFilter: isDark ? "blur(16px)" : "blur(12px)",
     WebkitBackdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+  };
+
+  const workspaceModeTabsStickyStyle = {
+    ...modeTabsWrapperStyle,
+    maxWidth: isAnalyzeMode ? "100%" : modeTabsWrapperStyle.maxWidth,
+    margin: isAnalyzeMode ? "0 auto 20px auto" : "0 auto 32px auto",
+    ...(workspaceNarrow || isAnalyzeMode
+      ? {}
+      : {
+          position: "sticky",
+          top: "16px",
+          zIndex: 4,
+        }),
   };
 
   const getModeTabButtonStyle = (active) => ({
@@ -2556,22 +3149,94 @@ export default function Home() {
     marginBottom: "8px",
   };
 
-  const uploadZoneStyle = {
+  const analyzeStageStyle = {
     width: "100%",
-    borderRadius: "18px",
-    padding: "22px 16px",
+    maxWidth: "100%",
+    margin: "0 auto",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: workspaceNarrow ? "12px" : "16px",
+    alignSelf: "stretch",
+  };
+
+  const analyzePreviewFrameStyle = {
+    width: "100%",
+    margin: "0 auto",
+    borderRadius: "16px",
+    border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.04)",
+    background: isDark ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.55)",
+    overflow: "hidden",
+    boxShadow: isDark
+      ? "0 24px 64px rgba(0,0,0,0.22)"
+      : "0 12px 32px rgba(0,0,0,0.07), 0 2px 22px rgba(160,150,190,0.08), inset 0 1px 0 rgba(255,255,255,0.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: workspaceNarrow ? "min(42vh, 360px)" : "min(48vh, 420px)",
+  };
+
+  const analyzePreviewImageStyle = {
+    width: "100%",
+    maxHeight: workspaceNarrow ? "min(56vh, 520px)" : "min(72vh, 760px)",
+    height: "auto",
+    display: "block",
+    objectFit: "contain",
+    objectPosition: "center",
+  };
+
+  const analyzeUploadZoneBaseStyle = {
+    width: "100%",
+    borderRadius: "16px",
+    transition: "all 0.3s ease",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  };
+
+  const analyzeUploadZoneEmptyStyle = {
+    ...analyzeUploadZoneBaseStyle,
+    padding: workspaceNarrow ? "18px 14px" : "20px 16px",
+    minHeight: "160px",
     border: isDark ? "1px dashed rgba(255,255,255,0.18)" : "1px dashed rgba(0,0,0,0.1)",
     background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.45)",
     textAlign: "center",
-    transition: "all 0.3s ease",
-    cursor: "pointer",
-    minHeight: "160px",
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
     alignItems: "center",
     gap: "12px",
   };
+
+  const analyzeUploadZoneWithImageStyle = {
+    ...analyzeUploadZoneBaseStyle,
+    padding: workspaceNarrow ? "8px 8px 12px" : "10px 10px 14px",
+    minHeight: "auto",
+    border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.05)",
+    background: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.42)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: "8px",
+  };
+
+  const analyzePostPreviewControlsStyle = {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "10px",
+    marginTop: workspaceNarrow ? "2px" : "4px",
+  };
+
+  const analyzeResultModuleStyle = {
+    ...aiResultModuleStyle,
+    marginTop: workspaceNarrow ? "8px" : "12px",
+    borderRadius: "16px",
+    border: isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid rgba(0,0,0,0.03)",
+    boxShadow: isDark ? "none" : "0 4px 16px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.48)",
+  };
+
+  const uploadZoneStyle = analyzeUploadZoneEmptyStyle;
 
   const uploadHintStyle = {
     fontSize: "15px",
@@ -2580,17 +3245,7 @@ export default function Home() {
     maxWidth: "420px",
   };
 
-  const uploadPreviewStyle = {
-    width: "100%",
-    maxWidth: "420px",
-    borderRadius: "14px",
-    border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.04)",
-    background: isDark ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.55)",
-    overflow: "hidden",
-    boxShadow: isDark
-      ? "0 20px 55px rgba(0,0,0,0.18)"
-      : "0 10px 28px rgba(0,0,0,0.06), 0 2px 20px rgba(160,150,190,0.08), inset 0 1px 0 rgba(255,255,255,0.5)",
-  };
+  const uploadPreviewStyle = analyzePreviewFrameStyle;
 
   const fileInputStyle = { display: "none" };
 
@@ -3754,7 +4409,10 @@ export default function Home() {
     setSelectedImageFileName(fileName);
     setSelectedImageMimeType(mimeType);
     setSelectedImagePreviewUrl(url);
-    setAnalyzeImageResult(null);
+    setSemanticDraft(null);
+    setActiveSavedAnalysisRecordId("");
+    setSavedDocumentSnapshot("");
+    setAnalyzeSceneError("");
     setIsAnalyzeResultVisible(false);
     setSelectedImageBase64("");
     setSelectedImageId("");
@@ -3781,7 +4439,7 @@ export default function Home() {
 
   const handleAnalyzeImage = async () => {
     if (isRunning) return;
-    if (!selectedImagePreviewUrl || !selectedImageFileName) return;
+    if (!selectedImagePreviewUrl || !selectedImageFileName || !selectedImageBase64) return;
 
     let projectKey = activeProjectKey;
     if (!projectKey) {
@@ -3794,7 +4452,7 @@ export default function Home() {
     const height = selectedImageDimensions?.height || 0;
 
     setIsRunning(true);
-    setAnalyzeImageResult(null);
+    setAnalyzeSceneError("");
     setIsAnalyzeResultVisible(false);
 
     try {
@@ -3803,20 +4461,43 @@ export default function Home() {
       const imageId = `analysis:${projectKey}:${analysisId}`;
       setSelectedImageId(imageId);
 
-      // Mock latency for cinematic feel
-      await new Promise((r) => window.setTimeout(r, 650 + Math.floor(Math.random() * 450)));
+      let extractedPalette = null;
+      try {
+        extractedPalette = await extractImagePalette(
+          selectedImageBase64,
+          selectedImageMimeType || "image/png"
+        );
+      } catch {
+        extractedPalette = null;
+      }
 
-      const mood = activeProjectMeta?.mood ?? "";
-      const result = runMockSemanticAnalysis({
-        fileName: selectedImageFileName,
-        width,
-        height,
-        mood,
-        projectKey,
-        paletteFamily: workspaceProjectPalette?.family ?? "",
+      const response = await fetch("/api/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: selectedImageBase64,
+          mimeType: selectedImageMimeType || "image/png",
+          languageMode: "ru",
+          analysisMode: "full",
+          extractedPalette,
+        }),
       });
 
-      setAnalyzeImageResult(result);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : "Vision analysis failed.");
+      }
+
+      const nextDraft = validateSemanticDraft(payload?.semanticDraft, {
+        languageMode: "ru",
+        analysisMode: "full",
+        extractedPalette,
+        viewMode: selectedAnalysisMode,
+      });
+      setActiveSavedAnalysisRecordId("");
+      setSavedDocumentSnapshot("");
+      setSemanticDraft(nextDraft);
+      setResultAnalysisMode(selectedAnalysisMode);
       window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
 
       if (isIndexedDbAvailable()) {
@@ -3832,15 +4513,18 @@ export default function Home() {
           mimeType: selectedImageMimeType || "image/png",
           width,
           height,
-          result,
+          semanticDraft: nextDraft,
+          result: nextDraft,
         };
         await saveSemanticAnalysisToDB(record);
+        setActiveAnalysisRecordId(record.id);
         const rows = await getSemanticAnalysesByProjectKey(projectKey, 10);
         setAnalyzeHistory(rows);
       }
     } catch (e) {
       console.error(e);
-      window.alert("Не удалось выполнить анализ. Попробуйте ещё раз.");
+      setSemanticDraft(null);
+      setAnalyzeSceneError("Не удалось проанализировать сцену");
     } finally {
       setIsRunning(false);
     }
@@ -3849,6 +4533,51 @@ export default function Home() {
   const sessionContextAligned = Boolean(
     activeProjectKey && resultDataMatchesActiveProject(resultData, activeProjectKey)
   );
+
+  const activeAnalysisRecord = useMemo(
+    () => analyzeHistory.find((row) => row.id === activeAnalysisRecordId) || null,
+    [analyzeHistory, activeAnalysisRecordId]
+  );
+
+  const activeSavedAnalysisRecord = useMemo(
+    () => savedAnalysisRecords.find((row) => row.id === activeSavedAnalysisRecordId) || null,
+    [savedAnalysisRecords, activeSavedAnalysisRecordId]
+  );
+
+  const analysisSaveStatus = useMemo(() => {
+    if (!semanticDraft) return null;
+    if (!activeSavedAnalysisRecordId) return "unsaved";
+    const fingerprint = buildAnalysisDocumentFingerprint({
+      semanticDraft,
+      activeMode: selectedAnalysisMode,
+      sourceImageId: selectedImageId,
+    });
+    if (savedDocumentSnapshot && fingerprint === savedDocumentSnapshot) return "saved";
+    return "dirty";
+  }, [
+    semanticDraft,
+    activeSavedAnalysisRecordId,
+    selectedAnalysisMode,
+    selectedImageId,
+    savedDocumentSnapshot,
+  ]);
+
+  const analysisSaveStatusLabel =
+    analysisSaveStatus === "saved"
+      ? "Сохранено"
+      : analysisSaveStatus === "dirty"
+        ? "Есть несохранённые изменения"
+        : analysisSaveStatus === "unsaved"
+          ? "Несохранённый анализ"
+          : "";
+
+  const activeBudgetDraft = useMemo(() => {
+    if (!activeProjectKey) return null;
+    const linkageId =
+      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
+    if (!linkageId) return null;
+    return getBudgetDraftForAnalysisRecord(linkageId);
+  }, [activeProjectKey, activeSavedAnalysisRecordId, selectedImageId, budgetDraftsVersion]);
 
   return (
     <main style={mainStyle}>
@@ -3888,7 +4617,29 @@ export default function Home() {
         <header style={workspaceHeaderMinimalStyle} aria-label="Верхняя панель" />
 
         <div style={workspaceGridStyle}>
-          <aside style={sidePanelBaseStyle} aria-label="Проекты">
+          <aside style={sidePanelBaseStyle} aria-label={isAnalyzeMode ? "Project Memory" : "Проекты"}>
+            {isAnalyzeMode && activeProjectKey ? (
+              <ProjectMemory
+                savedRecords={savedAnalysisRecords}
+                activeSavedRecordId={activeSavedAnalysisRecordId}
+                activeSceneLabel={
+                  selectedImageFileName ||
+                  semanticDraft?.quickAnalysis?.spaceType?.labelRu ||
+                  semanticDraft?.proAnalysis?.spaceType?.labelRu ||
+                  ""
+                }
+                activeSceneTimestamp={
+                  activeSavedAnalysisRecord?.updatedAt ||
+                  activeSavedAnalysisRecord?.createdAt ||
+                  activeAnalysisRecord?.createdAt ||
+                  ""
+                }
+                activeSemanticDraft={semanticDraft}
+                isDark={isDark}
+                onOpenSavedRecord={openSavedAnalysisDocument}
+              />
+            ) : (
+              <>
             <div style={sidePanelSectionTitleStyle}>Проекты</div>
             {projectList.length === 0 ? (
               <div
@@ -4019,6 +4770,8 @@ export default function Home() {
                 })}
               </div>
             )}
+              </>
+            )}
           </aside>
 
           <div style={workspaceCenterColumnStyle}>
@@ -4065,27 +4818,6 @@ export default function Home() {
             OSA помогает дизайнеру быстрее перейти от визуального образа к реальным решениям:
             материалам, брендам, подбору, логике проекта и будущей смете — в одном ясном пространстве.
           </p>
-
-          <div style={modeTabsWrapperStyle} role="tablist" aria-label="Режимы работы">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isGenerateMode}
-            onClick={() => setMode("generate")}
-            style={getModeTabButtonStyle(isGenerateMode)}
-          >
-            Создать интерьер
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isAnalyzeMode}
-            onClick={() => setMode("analyze")}
-            style={getModeTabButtonStyle(isAnalyzeMode)}
-          >
-            Анализировать изображение
-          </button>
-        </div>
 
         <div
           style={{
@@ -4141,13 +4873,29 @@ export default function Home() {
         ) : null}
 
         <div id="osa-workspace-anchor" style={workspaceCardStyle}>
-          {!activeProjectKey ? (
-            <>
-          <div style={workspaceLabelStyle}>
-            {isGenerateMode ? "Создать интерьер" : "Анализировать изображение"}
+          <div style={workspaceModeTabsStickyStyle} role="tablist" aria-label="Режимы работы">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isGenerateMode}
+              onClick={() => setMode("generate")}
+              style={getModeTabButtonStyle(isGenerateMode)}
+            >
+              Создать интерьер
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isAnalyzeMode}
+              onClick={() => setMode("analyze")}
+              style={getModeTabButtonStyle(isAnalyzeMode)}
+            >
+              Анализировать изображение
+            </button>
           </div>
 
           {isGenerateMode ? (
+            !activeProjectKey ? (
             <>
               <div style={workspaceGeneratePromptBlockStyle}>
                 <div style={{ ...workspaceLabelStyle, marginBottom: "12px" }}>Описание интерьера</div>
@@ -4643,236 +5391,7 @@ export default function Home() {
                 </>
               ) : null}
             </>
-          ) : (
-            <>
-              <div
-                style={{
-                  ...uploadZoneStyle,
-                  border: isAnalyzeDropActive
-                    ? isDark
-                      ? "1px dashed rgba(183,157,138,0.55)"
-                      : "1px dashed rgba(183,157,138,0.60)"
-                    : uploadZoneStyle.border,
-                  background: isAnalyzeDropActive
-                    ? isDark
-                      ? "rgba(183,157,138,0.10)"
-                      : "rgba(255,255,255,0.62)"
-                    : uploadZoneStyle.background,
-                  boxShadow: isAnalyzeDropActive
-                    ? isDark
-                      ? "0 18px 60px rgba(183,157,138,0.10)"
-                      : "0 12px 36px rgba(183,157,138,0.12)"
-                    : "none",
-                }}
-                role="button"
-                tabIndex={0}
-                onClick={() => analyzeFileInputRef.current?.click()}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") analyzeFileInputRef.current?.click();
-                }}
-                onDragEnter={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsAnalyzeDropActive(true);
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsAnalyzeDropActive(true);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsAnalyzeDropActive(false);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsAnalyzeDropActive(false);
-                  const file = e.dataTransfer?.files?.[0];
-                  if (file) ingestAnalyzeImageFile(file);
-                }}
-                aria-label="Зона загрузки изображения"
-              >
-                <input
-                  ref={analyzeFileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleImageFileChange}
-                  style={fileInputStyle}
-                />
-
-                {selectedImagePreviewUrl ? (
-                  <>
-                    <div style={uploadPreviewStyle}>
-                      <img
-                        src={selectedImagePreviewUrl}
-                        alt="Предпросмотр загруженного изображения"
-                        style={{ width: "100%", display: "block" }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        lineHeight: 1.5,
-                        color: isDark ? "rgba(243,238,231,0.70)" : "rgba(110,106,102,0.88)",
-                      }}
-                    >
-                      {selectedImageFileName}
-                      {selectedImageDimensions?.width && selectedImageDimensions?.height
-                        ? ` · ${selectedImageDimensions.width}×${selectedImageDimensions.height}`
-                        : ""}
-                    </div>
-                    <button
-                      type="button"
-                      style={{
-                        ...secondaryButton,
-                        margin: 0,
-                        padding: "10px 16px",
-                        fontSize: "14px",
-                        borderRadius: "12px",
-                        boxSizing: "border-box",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        analyzeFileInputRef.current?.click();
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = "translateY(-2px)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = "translateY(0px)";
-                      }}
-                    >
-                      Загрузить другое
-                    </button>
-                  </>
-                ) : (
-                  <div>
-                    <div style={uploadHintStyle}>
-                      Перетащите изображение сюда или загрузите файл кнопкой ниже
-                    </div>
-                    <div
-                      style={{
-                        marginTop: "10px",
-                        fontSize: "13px",
-                        color: isDark ? "rgba(243,238,231,0.60)" : "rgba(110,106,102,0.82)",
-                      }}
-                    >
-                      JPG / PNG / WebP
-                    </div>
-                    <button
-                      type="button"
-                      style={{
-                        ...primaryButton,
-                        margin: "14px auto 0 auto",
-                        padding: "12px 18px",
-                        fontSize: "14px",
-                        borderRadius: "12px",
-                        boxSizing: "border-box",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        analyzeFileInputRef.current?.click();
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = "translateY(-2px)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = "translateY(0px)";
-                      }}
-                    >
-                      Загрузить изображение
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <button
-                style={actionButtonStyle}
-                onClick={handleAnalyzeImage}
-                disabled={isRunning || !selectedImagePreviewUrl}
-                onMouseEnter={(e) => {
-                  if (isRunning) return;
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                }}
-                onMouseLeave={(e) => {
-                  if (isRunning) return;
-                  e.currentTarget.style.transform = "translateY(0px)";
-                }}
-              >
-                {isRunning ? "Анализируем…" : "Анализировать интерьер"}
-              </button>
-
-              <div style={aiResultModuleStyle}>
-                <div style={aiResultHeaderAnalyzeStyle}>
-                  <div style={aiResultHeaderTitleStyle}>OSA Semantic Analysis</div>
-                  <div style={aiResultHeaderSubtitleStyle}>
-                    {analyzeImageResult
-                      ? "Семантический разбор готов"
-                      : isAnalyzeLoading
-                        ? "Собираем семантику, палитру и материалы…"
-                        : "Загрузите изображение и нажмите «Анализировать интерьер»"}
-                  </div>
-                </div>
-
-                <div style={aiResultContentStyle}>
-                  {analyzeImageResult ? (
-                    <>
-                      <SemanticAnalysisCards
-                        result={analyzeImageResult}
-                        revealStyle={generateRevealStyle(isAnalyzeResultVisible)}
-                        cardStyle={aiFieldCardAnalyzeStyle}
-                        labelStyle={aiFieldLabelStyle}
-                        valueStyle={aiFieldValueStyle}
-                        chipStyle={aiChipAnalyzeStyle}
-                      />
-
-                      {Array.isArray(analyzeHistory) && analyzeHistory.length > 0 ? (
-                        <div style={{ marginTop: "14px" }}>
-                          <div style={{ ...aiFieldLabelStyle, marginBottom: "10px" }}>HISTORY</div>
-                          <div style={aiChipsContainerStyle}>
-                            {analyzeHistory.slice(0, 5).map((row) => (
-                              <button
-                                key={row.id}
-                                type="button"
-                                style={{
-                                  ...aiChipAnalyzeStyle,
-                                  cursor: "pointer",
-                                  background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.65)",
-                                }}
-                                onClick={() => restoreSemanticAnalysisFromRecord(row)}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.transform = "translateY(-1px)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.transform = "translateY(0px)";
-                                }}
-                              >
-                                {(row.fileName ? String(row.fileName).slice(0, 18) : "analysis") +
-                                  (row.fileName && String(row.fileName).length > 18 ? "…" : "")}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div style={aiEmptyStateStyle}>
-                      <div style={aiEmptyTitleStyle}>Результат анализа</div>
-                      <div style={aiEmptyTextStyle}>
-                        {isAnalyzeLoading
-                          ? "Система формирует стиль, материалы, палитру, объекты и атмосферу…"
-                          : "Загрузите изображение и нажмите «Анализировать интерьер» — появится cinematic semantic-разбор."}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-            </>
-          ) : (
+            ) : (
             <>
               <div
                 style={{
@@ -5559,9 +6078,327 @@ export default function Home() {
                 </div>
               )}
             </>
+          )
+          ) : (
+            <div style={analyzeStageStyle}>
+              <div
+                style={{
+                  ...(selectedImagePreviewUrl ? analyzeUploadZoneWithImageStyle : analyzeUploadZoneEmptyStyle),
+                  border: isAnalyzeDropActive
+                    ? isDark
+                      ? "1px dashed rgba(183,157,138,0.55)"
+                      : "1px dashed rgba(183,157,138,0.60)"
+                    : selectedImagePreviewUrl
+                      ? analyzeUploadZoneWithImageStyle.border
+                      : analyzeUploadZoneEmptyStyle.border,
+                  background: isAnalyzeDropActive
+                    ? isDark
+                      ? "rgba(183,157,138,0.10)"
+                      : "rgba(255,255,255,0.62)"
+                    : selectedImagePreviewUrl
+                      ? analyzeUploadZoneWithImageStyle.background
+                      : analyzeUploadZoneEmptyStyle.background,
+                  boxShadow: isAnalyzeDropActive
+                    ? isDark
+                      ? "0 18px 60px rgba(183,157,138,0.10)"
+                      : "0 12px 36px rgba(183,157,138,0.12)"
+                    : selectedImagePreviewUrl
+                      ? analyzePreviewFrameStyle.boxShadow
+                      : "none",
+                }}
+                role="button"
+                tabIndex={0}
+                onClick={() => analyzeFileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") analyzeFileInputRef.current?.click();
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAnalyzeDropActive(false);
+                  const file = e.dataTransfer?.files?.[0];
+                  if (file) ingestAnalyzeImageFile(file);
+                }}
+                aria-label="Зона загрузки изображения"
+              >
+                <input
+                  ref={analyzeFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleImageFileChange}
+                  style={fileInputStyle}
+                />
+
+                {selectedImagePreviewUrl ? (
+                  <>
+                    <div style={analyzePreviewFrameStyle}>
+                      <img
+                        src={selectedImagePreviewUrl}
+                        alt="Предпросмотр загруженного изображения"
+                        style={analyzePreviewImageStyle}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        lineHeight: 1.45,
+                        color: isDark ? "rgba(243,238,231,0.70)" : "rgba(110,106,102,0.88)",
+                      }}
+                    >
+                      {selectedImageFileName}
+                      {selectedImageDimensions?.width && selectedImageDimensions?.height
+                        ? ` · ${selectedImageDimensions.width}×${selectedImageDimensions.height}`
+                        : ""}
+                    </div>
+                    <button
+                      type="button"
+                      style={{
+                        ...secondaryButton,
+                        margin: 0,
+                        padding: "10px 16px",
+                        fontSize: "14px",
+                        borderRadius: "12px",
+                        boxSizing: "border-box",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        analyzeFileInputRef.current?.click();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0px)";
+                      }}
+                    >
+                      Загрузить другое
+                    </button>
+                  </>
+                ) : (
+                  <div>
+                    <div style={uploadHintStyle}>
+                      Перетащите изображение сюда или загрузите файл кнопкой ниже
+                    </div>
+                    <div
+                      style={{
+                        marginTop: "10px",
+                        fontSize: "13px",
+                        color: isDark ? "rgba(243,238,231,0.60)" : "rgba(110,106,102,0.82)",
+                      }}
+                    >
+                      JPG / PNG / WebP
+                    </div>
+                    <button
+                      type="button"
+                      style={{
+                        ...primaryButton,
+                        margin: "14px auto 0 auto",
+                        padding: "12px 18px",
+                        fontSize: "14px",
+                        borderRadius: "12px",
+                        boxSizing: "border-box",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        analyzeFileInputRef.current?.click();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0px)";
+                      }}
+                    >
+                      Загрузить изображение
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div style={analyzePostPreviewControlsStyle}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                  justifyContent: "center",
+                  marginBottom: "4px",
+                }}
+              >
+                {ANALYSIS_MODES.map((mode) => {
+                  const active = selectedAnalysisMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setSelectedAnalysisMode(mode)}
+                      disabled={isRunning}
+                      style={{
+                        ...aiChipAnalyzeStyle,
+                        padding: "8px 12px",
+                        fontSize: "12px",
+                        cursor: isRunning ? "default" : "pointer",
+                        opacity: isRunning ? 0.6 : 1,
+                        background: active
+                          ? isDark
+                            ? "rgba(183,157,138,0.18)"
+                            : "rgba(183,157,138,0.16)"
+                          : isDark
+                            ? "rgba(255,255,255,0.04)"
+                            : "rgba(255,255,255,0.65)",
+                        border: active
+                          ? "1px solid rgba(183,157,138,0.42)"
+                          : aiChipAnalyzeStyle.border,
+                      }}
+                    >
+                      {ANALYSIS_MODE_LABELS_RU[mode] || mode}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div
+                style={{
+                  marginBottom: "4px",
+                  fontSize: "12px",
+                  lineHeight: 1.45,
+                  color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.88)",
+                }}
+              >
+                {hasSemanticAnalysis(semanticDraft)
+                  ? `Просмотр: ${ANALYSIS_MODE_LABELS_RU[selectedAnalysisMode] || selectedAnalysisMode}`
+                  : "Загрузите изображение и нажмите «Анализировать интерьер»"}
+              </div>
+
+              <button
+                style={actionButtonStyle}
+                onClick={handleAnalyzeImage}
+                disabled={isRunning || !selectedImagePreviewUrl || !selectedImageBase64}
+                onMouseEnter={(e) => {
+                  if (isRunning) return;
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                }}
+                onMouseLeave={(e) => {
+                  if (isRunning) return;
+                  e.currentTarget.style.transform = "translateY(0px)";
+                }}
+              >
+                {isRunning ? "Анализируем…" : "Анализировать интерьер"}
+              </button>
+              </div>
+
+              <div style={{ ...analyzeResultModuleStyle, width: "100%", alignSelf: "stretch" }}>
+                <div style={aiResultHeaderAnalyzeStyle}>
+                  <div style={aiResultHeaderTitleStyle}>АНАЛИЗ СЦЕНЫ</div>
+                  <div style={aiResultHeaderSubtitleStyle}>
+                    {semanticDraft
+                      ? "Семантический разбор сцены готов"
+                      : isAnalyzeLoading
+                        ? "Анализ интерьерной сцены..."
+                        : "Загрузите изображение и нажмите «Анализировать интерьер»"}
+                  </div>
+                  {semanticDraft ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                        alignItems: "center",
+                        marginTop: "10px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "12px",
+                          lineHeight: 1.45,
+                          color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.88)",
+                        }}
+                      >
+                        {analysisSaveStatusLabel}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSaveAnalysisDocument}
+                        disabled={isRunning}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: "999px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: isRunning ? "default" : "pointer",
+                          opacity: isRunning ? 0.6 : 1,
+                          border: isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(0,0,0,0.08)",
+                          background: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.85)",
+                          color: "inherit",
+                          font: "inherit",
+                        }}
+                      >
+                        Сохранить анализ
+                      </button>
+                    </div>
+                  ) : null}
+                  {process.env.NODE_ENV === "development" && semanticDraft ? (
+                    <AnalysisQualityCheckPanel
+                      semanticDraft={semanticDraft}
+                      budgetDraft={activeBudgetDraft}
+                      scenarioType={devAnalysisScenarioType}
+                      onScenarioTypeChange={setDevAnalysisScenarioType}
+                      isDark={isDark}
+                    />
+                  ) : null}
+                </div>
+
+                <div style={aiResultContentStyle}>
+                  {semanticDraft ? (
+                    <VisionAnalysisPanel
+                      semanticDraft={semanticDraft}
+                      activeMode={selectedAnalysisMode}
+                      isDark={isDark}
+                      revealStyle={generateRevealStyle(isAnalyzeResultVisible)}
+                      budgetDraft={activeBudgetDraft}
+                      onCreateBudgetDraft={handleCreateBudgetDraft}
+                      onPrepareGenerationPackage={handlePrepareGenerationPackage}
+                      sourceImageId={selectedImageId}
+                      sourceImageBase64={selectedImageBase64}
+                      onControlledRegenerate={handleControlledRegenerate}
+                      isControlledRegenerating={isControlledRegenerating}
+                      controlledRegenerationError={controlledRegenerationError}
+                      controlledRegenerationResult={controlledRegenerationResult}
+                      onAnalyzeControlledVisual={handleAnalyzeControlledVisual}
+                    />
+                  ) : (
+                    <div style={aiEmptyStateStyle}>
+                      <div style={aiEmptyTitleStyle}>Результат анализа</div>
+                      <div style={aiEmptyTextStyle}>
+                        {analyzeSceneError
+                          ? analyzeSceneError
+                          : isAnalyzeLoading
+                            ? "Анализ интерьерной сцены..."
+                            : "Загрузите изображение и нажмите «Анализировать интерьер» — появится semantic-разбор сцены."}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
-
+        {!isAnalyzeMode ? (
         <div style={statsRowWrapperStyle}>
           <div style={statStyle} {...statCardLightHoverHandlers}>
             <div
@@ -5626,10 +6463,35 @@ export default function Home() {
             </div>
           </div>
         </div>
+        ) : null}
       </div>
           </div>
 
-          <aside style={rightContextAsideStyle} aria-label="Контекст проекта">
+          <aside style={rightContextAsideStyle} aria-label={isAnalyzeMode ? "Project Sidebar" : "Контекст проекта"}>
+            {isAnalyzeMode ? (
+              activeProjectKey ? (
+                <ProjectSidebar
+                  semanticDraft={semanticDraft}
+                  budgetDraft={activeBudgetDraft}
+                  isDark={isDark}
+                  isRunning={isAnalyzeLoading}
+                  analysisDocumentSaved={analysisSaveStatus === "saved"}
+                />
+              ) : (
+                <div
+                  style={{
+                    ...contextPlaceholderCardStyle,
+                    marginTop: 0,
+                    borderStyle: "solid",
+                    borderColor: isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.04)",
+                    color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+                  }}
+                >
+                  Выберите проект слева или начните анализ.
+                </div>
+              )
+            ) : (
+              <>
             <div style={sidePanelSectionTitleStyle}>Контекст проекта</div>
             {!activeProjectKey ? (
               <div
@@ -5872,6 +6734,8 @@ export default function Home() {
                   Скоро: ориентировочная смета по проекту.
                 </div>
               </div>
+            )}
+              </>
             )}
           </aside>
         </div>
