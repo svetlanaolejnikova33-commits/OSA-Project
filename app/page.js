@@ -2406,7 +2406,7 @@ export default function Home() {
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "center",
-    padding: rv(isMobile, "24px 20px 48px 20px", "14px 16px 28px 16px"),
+    padding: rv(isMobile, "24px 20px 48px 20px", "12px 14px 28px 14px"),
     background: isDark
       ? `${workspaceProjectPalette?.mainRadialExtraDark ?? ""}radial-gradient(circle at 20% 20%,#32353A 0%,#1D1F22 45%,#141516 100%)`
       : `${workspaceProjectPalette?.mainRadialExtraLight ?? ""}radial-gradient(50% 50% at 20% 10%, rgba(183,157,138,0.10), transparent), radial-gradient(40% 40% at 80% 30%, rgba(160,150,190,0.08), transparent), #F3EEE7`,
@@ -2497,7 +2497,7 @@ export default function Home() {
     width: "100%",
     maxWidth: rv(isMobile, "100%", "none"),
     borderRadius: rv(isMobile, "28px", "20px"),
-    padding: rv(isMobile, "28px 40px 52px 40px", "20px"),
+    padding: rv(isMobile, "28px 40px 52px 40px", "16px 14px 24px 14px"),
     textAlign: "center",
     boxSizing: "border-box",
     background: isDark
@@ -2539,7 +2539,7 @@ export default function Home() {
 
   const heroBadgeStyle = {
     ...badgeStyle,
-    marginBottom: isMobile ? "16px" : "26px",
+    marginBottom: isMobile ? "10px" : "26px",
     position: "relative",
     zIndex: 1,
   };
@@ -2559,10 +2559,10 @@ export default function Home() {
     left: "50%",
     top: "48%",
     transform: "translate(-50%, -50%)",
-    width: isMobile ? "min(320px, 88vw)" : "min(720px, 110vw)",
-    height: isMobile ? "min(320px, 88vw)" : "min(720px, 110vw)",
-    maxWidth: isMobile ? "360px" : "820px",
-    maxHeight: isMobile ? "360px" : "820px",
+    width: isMobile ? "min(220px, 70vw)" : "min(720px, 110vw)",
+    height: isMobile ? "min(220px, 70vw)" : "min(720px, 110vw)",
+    maxWidth: isMobile ? "260px" : "820px",
+    maxHeight: isMobile ? "260px" : "820px",
     borderRadius: "50%",
     background: isDark
       ? "radial-gradient(circle at center, rgba(183,157,138,0.18) 0%, rgba(183,157,138,0.08) 38%, transparent 70%)"
@@ -2580,16 +2580,16 @@ export default function Home() {
     alignItems: "center",
     justifyContent: "center",
     zIndex: 1,
-    padding: "8px 0 12px 0",
+    padding: isMobile ? "4px 0 6px 0" : "8px 0 12px 0",
   };
 
   const heroSectionStyle = {
     position: "relative",
     width: "100%",
-    maxWidth: rv(isMobile, "1040px", "none"),
+    maxWidth: rv(isMobile, "1040px", "100%"),
     margin: "0 auto",
     marginTop: isMobile ? "0" : "clamp(4px, 1.5vw, 16px)",
-    padding: rv(isMobile, "8px 12px 40px 12px", "20px"),
+    padding: rv(isMobile, "8px 12px 40px 12px", "4px 8px 16px 8px"),
     boxSizing: "border-box",
     textAlign: "center",
     animation: "osaHeroEnter 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both",
@@ -2600,21 +2600,27 @@ export default function Home() {
 
   const titleStyle = {
     fontSize: isMobile ? "clamp(1.5rem, 6.5vw, 34px)" : "clamp(2.875rem, 4.8vw, 3.875rem)",
-    lineHeight: isMobile ? "1.1" : "1.05",
+    lineHeight: isMobile ? "1.12" : "1.05",
     fontWeight: isDark ? "600" : "650",
-    letterSpacing: "-0.022em",
-    margin: isMobile ? "0 0 16px 0" : "0 0 24px 0",
+    letterSpacing: isMobile ? "normal" : "-0.022em",
+    wordSpacing: isMobile ? "normal" : undefined,
+    margin: isMobile ? "0 0 12px 0" : "0 0 24px 0",
     position: "relative",
     zIndex: 1,
     color: isDark ? "#FAFAF8" : "#2B2B2B",
+    width: isMobile ? "100%" : undefined,
+    maxWidth: isMobile ? "100%" : undefined,
+    boxSizing: "border-box",
+    wordBreak: isMobile ? "normal" : undefined,
+    overflowWrap: isMobile ? "normal" : undefined,
     textShadow: isDark
       ? "0 2px 20px rgba(0,0,0,0.4), 0 4px 36px rgba(0,0,0,0.25)"
       : "0 2px 18px rgba(255,255,255,0.75), 0 3px 28px rgba(160,150,190,0.10)",
   };
 
   const textStyle = {
-    maxWidth: rv(isMobile, "720px", "none"),
-    margin: isMobile ? "0 auto 24px auto" : "0 auto 40px auto",
+    maxWidth: rv(isMobile, "720px", "100%"),
+    margin: isMobile ? "0 auto 18px auto" : "0 auto 40px auto",
     fontSize: isMobile ? "0.9375rem" : "19px",
     lineHeight: isMobile ? "1.55" : "1.72",
     color: isDark ? "rgba(243,238,231,0.74)" : "#6E6A66",
@@ -2716,13 +2722,12 @@ export default function Home() {
     : "0 12px 28px rgba(0,0,0,0.08), 0 2px 0 rgba(160,150,190,0.1), inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -1px 0 rgba(0,0,0,0.03)";
 
   const statStyle = {
-    flex: isMobile ? "0 0 auto" : "1 1 0",
-    flexShrink: isMobile ? 0 : undefined,
-    minWidth: isMobile ? "220px" : "0",
-    width: isMobile ? "220px" : undefined,
-    maxWidth: isMobile ? "260px" : undefined,
+    flex: isMobile ? "none" : "1 1 0",
+    minWidth: "0",
+    width: isMobile ? "100%" : undefined,
+    maxWidth: isMobile ? "100%" : undefined,
     height: isMobile ? "auto" : undefined,
-    padding: isMobile ? "14px 14px" : "18px 20px",
+    padding: isMobile ? "18px 18px" : "18px 20px",
     borderRadius: "18px",
     boxSizing: "border-box",
     background: isDark
@@ -2760,24 +2765,25 @@ export default function Home() {
 
   const statsRowWrapperStyle = {
     width: "100%",
-    maxWidth: rv(isMobile, "760px", "none"),
+    maxWidth: rv(isMobile, "760px", "100%"),
     margin: "0 auto",
     padding: 0,
     boxSizing: "border-box",
-    display: "flex",
+    display: isMobile ? "grid" : "flex",
+    gridTemplateColumns: isMobile ? "1fr" : undefined,
     gap: isMobile ? "12px" : "14px",
     flexWrap: isMobile ? "nowrap" : "wrap",
-    justifyContent: isMobile ? "flex-start" : "center",
-    overflowX: isMobile ? "auto" : "visible",
-    overscrollBehaviorX: isMobile ? "contain" : undefined,
-    scrollSnapType: isMobile ? "x mandatory" : undefined,
-    WebkitOverflowScrolling: isMobile ? "touch" : undefined,
+    justifyContent: isMobile ? "stretch" : "center",
+    overflowX: isMobile ? "visible" : "visible",
+    overscrollBehaviorX: undefined,
+    scrollSnapType: undefined,
+    WebkitOverflowScrolling: undefined,
   };
 
   const workspaceCardStyle = {
-    maxWidth: isMobile ? "none" : isAnalyzeMode ? "min(1080px, 100%)" : "760px",
+    maxWidth: isMobile ? "100%" : isAnalyzeMode ? "min(1080px, 100%)" : "760px",
     width: "100%",
-    margin: isMobile ? "16px auto 28px auto" : "28px auto 48px auto",
+    margin: isMobile ? "10px auto 16px auto" : "28px auto 48px auto",
     borderRadius: isMobile ? "18px" : "22px",
     padding: isMobile
       ? isAnalyzeMode
@@ -2871,14 +2877,18 @@ export default function Home() {
     borderRadius: isMobile ? "12px" : "14px",
     border: "none",
     cursor: "pointer",
-    padding: isMobile ? "12px" : "14px 18px",
+    padding: isMobile ? "10px 6px" : "14px 18px",
     fontSize: isMobile ? "14px" : "15px",
-    minHeight: isMobile ? "44px" : undefined,
-    whiteSpace: "nowrap",
+    minHeight: isMobile ? "56px" : undefined,
+    whiteSpace: isMobile ? "normal" : "nowrap",
     textAlign: "center",
-    overflow: isMobile ? "hidden" : undefined,
-    textOverflow: isMobile ? "ellipsis" : undefined,
-    letterSpacing: "0.02em",
+    overflow: isMobile ? "visible" : undefined,
+    lineHeight: isMobile ? "1.15" : undefined,
+    letterSpacing: isMobile ? "normal" : "0.02em",
+    display: isMobile ? "flex" : undefined,
+    alignItems: isMobile ? "center" : undefined,
+    justifyContent: isMobile ? "center" : undefined,
+    boxSizing: "border-box",
     fontWeight: active ? "650" : "520",
     color: active
       ? isDark
@@ -4816,7 +4826,7 @@ export default function Home() {
                 src="/logo.png"
                 alt="OSA"
                 style={{
-                  width: isMobile ? "clamp(64px, 18vw, 80px)" : workspaceNarrow ? "clamp(72px, 22vw, 90px)" : "clamp(96px, 11vw, 130px)",
+                  width: isMobile ? "clamp(52px, 15vw, 68px)" : workspaceNarrow ? "clamp(72px, 22vw, 90px)" : "clamp(96px, 11vw, 130px)",
                   height: "auto",
                   position: "relative",
                   zIndex: 2,
@@ -4840,7 +4850,7 @@ export default function Home() {
             </div>
           </div>
           <h1 className="osa-hero-title" style={titleStyle}>
-            Платформа, где интерьер
+            Платформа, где интерьер{" "}
             <br />
             становится системой
           </h1>

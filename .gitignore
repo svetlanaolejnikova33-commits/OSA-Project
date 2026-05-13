@@ -40,6 +40,13 @@ Thumbs.db
 *.7z
 *.rar
 
+# local screenshots / UI captures (not for repo)
+screenshots/
+
+# common test output dirs
+test-results/
+playwright-report/
+
 # temporary files
 tmp/
 cache/
