@@ -4369,6 +4369,11 @@ export default function Home() {
     const prompt = interiorDescription.trim();
     if (!prompt) return;
 
+    if (process.env.NODE_ENV === "development") {
+      console.log("[OSA][generate] click");
+      console.log("[OSA][generate] prompt length", prompt.length);
+    }
+
     setIsRunning(true);
     setGenerateError("");
     setResultData(null);
@@ -4381,24 +4386,53 @@ export default function Home() {
     setShowImagePromptDetails(false);
     setIsGenerateResultVisible(false);
 
+    const friendlyError =
+      "Не удалось создать визуал. Проверьте API или повторите позже.";
+
     try {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[OSA][generate] request started", { endpoint: "/api/generate" });
+      }
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
       });
 
-      const payload = await response.json();
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = {};
+      }
+
+      if (process.env.NODE_ENV === "development") {
+        console.log("[OSA][generate] response", response.ok ? "ok" : "error", response.status);
+      }
+
       if (!response.ok) {
-        throw new Error(payload?.error || "Не удалось сгенерировать концепцию.");
+        const serverMsg =
+          typeof payload?.error === "string" && payload.error.trim() ? payload.error.trim() : "";
+        throw new Error(serverMsg || friendlyError);
       }
 
       const projectKey = newStableId();
       setResultData({ ...payload, projectKey });
       window.setTimeout(() => setIsGenerateResultVisible(true), 0);
     } catch (error) {
-      console.error(error);
-      setGenerateError(error?.message || "Не удалось получить ответ AI. Попробуйте еще раз.");
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[OSA][generate] failed", error);
+      } else {
+        console.error(error);
+      }
+      const msg =
+        typeof error?.message === "string" && error.message.trim()
+          ? error.message.trim()
+          : friendlyError;
+      const networkFail =
+        error?.name === "TypeError" ||
+        /failed to fetch|networkerror|load failed|network request failed/i.test(msg);
+      setGenerateError(networkFail ? friendlyError : msg);
       setResultData(null);
     } finally {
       setIsRunning(false);
@@ -5020,9 +5054,18 @@ export default function Home() {
               </div>
 
               <button
+                type="button"
                 className="osa-primary-button"
-                style={actionButtonStyle}
+                style={{
+                  ...actionButtonStyle,
+                  touchAction: "manipulation",
+                  WebkitTapHighlightColor: "transparent",
+                }}
                 disabled={isRunning || !interiorDescription.trim()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleGenerateInteriorConcept();
+                }}
                 onMouseEnter={(e) => {
                   if (isRunning) return;
                   e.currentTarget.style.transform = "translateY(-2px)";
@@ -5032,7 +5075,7 @@ export default function Home() {
                   e.currentTarget.style.transform = "translateY(0px)";
                 }}
               >
-                {isRunning ? "Генерация..." : "Сгенерировать"}
+                {isGenerateLoading ? "Генерируем концепцию..." : "Сгенерировать"}
               </button>
 
               <div style={aiResultModuleStyle}>
@@ -5042,7 +5085,7 @@ export default function Home() {
                     {resultData
                       ? "Концепция готова в структурированном виде"
                       : isGenerateLoading
-                        ? "Формируем концепцию по описанию…"
+                        ? "Генерируем концепцию..."
                         : "Готовим ответ для вашего запроса"}
                   </div>
                 </div>
@@ -5170,8 +5213,8 @@ export default function Home() {
                         {generateError
                           ? generateError
                           : isGenerateLoading
-                          ? "Система анализирует ввод и формирует дизайн-концепцию…"
-                          : "Опишите интерьер в поле выше и нажмите «Сгенерировать» — мы соберем концепцию в структуре."}
+                            ? "Генерируем концепцию..."
+                            : "Опишите интерьер в поле выше и нажмите «Сгенерировать» — мы соберем концепцию в структуре."}
                       </div>
                     </div>
                   )}
