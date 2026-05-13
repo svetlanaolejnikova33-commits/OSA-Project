@@ -50,6 +50,15 @@ import {
 import { attachRelatedEditableObjectsToSpecGroups } from "./lib/editableObjectsUtils";
 import { attachRelatedSceneObjectsToSpecGroups } from "./lib/sceneGraphUtils";
 import { useResponsiveLayout, rv } from "./lib/responsiveLayout";
+import {
+  ensureStorageVersion,
+  readWorkspaceSessionRaw,
+  normalizeWorkspaceSessionEnvelope,
+  isSessionEnvelopeMeaningful,
+  buildWorkspaceSessionEnvelope,
+  writeWorkspaceSessionEnvelope,
+  clearWorkspaceSessionEnvelope,
+} from "./lib/workspaceSessionPersistence";
 
 /** Atmosphere modes (image API + badges). English labels as design system. */
 const ATMOSPHERE_KEYS = [
@@ -104,6 +113,11 @@ function migrateIterationTypeStored(raw) {
   if (!raw || typeof raw !== "string") return "";
   if (raw === "text_edit") return IT_TEXT_EDIT_MOCK;
   return raw;
+}
+
+function normalizeAtmosphereChoiceStored(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return "architectural_white";
+  return ALTERNATE_KIND_KEYS.includes(raw) ? raw : "architectural_white";
 }
 
 function deriveIterationLabelFrom(meta) {
@@ -1415,9 +1429,187 @@ export default function Home() {
   const [controlledRegenerationError, setControlledRegenerationError] = useState("");
   const [controlledRegenerationResult, setControlledRegenerationResult] = useState(null);
 
+  const [hasRestoredWorkspaceSession, setHasRestoredWorkspaceSession] = useState(false);
+  const [createDraftPersistStatus, setCreateDraftPersistStatus] = useState("idle");
+  const workspaceSessionEnvelopeRef = useRef(null);
+  const skipNextSemanticIdbHydrationRef = useRef(false);
+  const preferSessionInteriorDraftRef = useRef(false);
+  const stableSessionProjectKeyRef = useRef("");
+  const workspaceSaveTimerRef = useRef(null);
+  const createDraftDirtyRef = useRef(false);
+  const persistWorkspaceSessionNowRef = useRef(() => {});
+
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 180);
     return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    ensureStorageVersion();
+    const raw = readWorkspaceSessionRaw();
+    const envelope = normalizeWorkspaceSessionEnvelope(raw);
+    workspaceSessionEnvelopeRef.current = envelope;
+
+    if (!isSessionEnvelopeMeaningful(envelope)) {
+      setHasRestoredWorkspaceSession(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    let restoredMarker = false;
+
+    if (envelope.projectKey && String(envelope.projectKey).trim()) {
+      const pk = String(envelope.projectKey).trim();
+      stableSessionProjectKeyRef.current = pk;
+      persistActiveProjectKey(pk);
+      setActiveProjectKey(pk);
+    }
+
+    if (envelope.activeMode === "analyze") {
+      setMode("analyze");
+    } else {
+      setMode("generate");
+    }
+
+    const cd = envelope.createDraft && typeof envelope.createDraft === "object" ? envelope.createDraft : {};
+    if (typeof cd.interiorDescription === "string" && cd.interiorDescription.trim()) {
+      setInteriorDescription(cd.interiorDescription);
+      preferSessionInteriorDraftRef.current = true;
+      restoredMarker = true;
+    }
+    if (typeof cd.atmosphereChoice === "string" && cd.atmosphereChoice) {
+      setAtmosphereChoice(normalizeAtmosphereChoiceStored(cd.atmosphereChoice));
+      restoredMarker = true;
+    }
+    if (cd.resultData && typeof cd.resultData === "object") {
+      setResultData(cd.resultData);
+      restoredMarker = true;
+    }
+    if (cd.isGenerateResultVisible === true) {
+      setIsGenerateResultVisible(true);
+    }
+    if (cd.activePromptVersionId != null && String(cd.activePromptVersionId).trim()) {
+      setActivePromptVersionIdState(String(cd.activePromptVersionId).trim());
+    }
+    if (cd.selectedSessionVisualId != null && String(cd.selectedSessionVisualId).trim()) {
+      setSelectedSessionVisualId(String(cd.selectedSessionVisualId).trim());
+    }
+
+    const ad = envelope.analyzeDraft && typeof envelope.analyzeDraft === "object" ? envelope.analyzeDraft : {};
+    if (typeof ad.selectedAnalysisMode === "string" && ad.selectedAnalysisMode.trim()) {
+      setSelectedAnalysisMode(normalizeAnalysisMode(ad.selectedAnalysisMode));
+      restoredMarker = true;
+    }
+    if (typeof ad.resultAnalysisMode === "string" && ad.resultAnalysisMode.trim()) {
+      setResultAnalysisMode(ad.resultAnalysisMode);
+    }
+    if (ad.semanticDraft && typeof ad.semanticDraft === "object") {
+      try {
+        setSemanticDraft(
+          validateSemanticDraft(ad.semanticDraft, {
+            languageMode: ad.semanticDraft?.languageMode || "ru",
+          })
+        );
+      } catch {
+        setSemanticDraft(normalizeSemanticDraft(ad.semanticDraft));
+      }
+      skipNextSemanticIdbHydrationRef.current = true;
+      restoredMarker = true;
+    }
+    if (typeof ad.selectedImageFileName === "string") {
+      setSelectedImageFileName(ad.selectedImageFileName);
+    }
+    if (typeof ad.selectedImageMimeType === "string" && ad.selectedImageMimeType.trim()) {
+      setSelectedImageMimeType(ad.selectedImageMimeType);
+    }
+    if (ad.selectedImageDimensions && typeof ad.selectedImageDimensions === "object") {
+      setSelectedImageDimensions({
+        width: Number.isFinite(ad.selectedImageDimensions.width) ? ad.selectedImageDimensions.width : 0,
+        height: Number.isFinite(ad.selectedImageDimensions.height) ? ad.selectedImageDimensions.height : 0,
+      });
+    }
+    if (typeof ad.selectedImageId === "string") {
+      setSelectedImageId(ad.selectedImageId);
+    }
+    if (typeof ad.activeAnalysisRecordId === "string") {
+      setActiveAnalysisRecordId(ad.activeAnalysisRecordId);
+    }
+    if (typeof ad.activeSavedAnalysisRecordId === "string") {
+      setActiveSavedAnalysisRecordId(ad.activeSavedAnalysisRecordId);
+    }
+    if (typeof ad.savedDocumentSnapshot === "string") {
+      setSavedDocumentSnapshot(ad.savedDocumentSnapshot);
+    }
+    if (ad.isAnalyzeResultVisible === true) {
+      setIsAnalyzeResultVisible(true);
+    }
+
+    const slimGallery = Array.isArray(cd.sessionVisualGallery) ? cd.sessionVisualGallery : [];
+
+    (async () => {
+      let anyRestored = restoredMarker;
+
+      const hydratedGallery = [];
+      for (const row of slimGallery) {
+        if (!row || typeof row !== "object" || row.id == null) continue;
+        const id = String(row.id);
+        let b64 = "";
+        if (isIndexedDbAvailable()) {
+          try {
+            b64 = (await getImageFromDB(id)) || "";
+          } catch {
+            b64 = "";
+          }
+        }
+        hydratedGallery.push({ ...row, id, imageBase64: b64 });
+      }
+      if (hydratedGallery.length) {
+        setSessionVisualGallery(hydratedGallery);
+        setSelectedSessionVisualId((prevSel) => {
+          const want =
+            cd.selectedSessionVisualId != null && String(cd.selectedSessionVisualId).trim()
+              ? String(cd.selectedSessionVisualId).trim()
+              : "";
+          if (want && hydratedGallery.some((x) => x.id === want)) return want;
+          if (prevSel && hydratedGallery.some((x) => x.id === prevSel)) return prevSel;
+          return hydratedGallery[0]?.id ?? null;
+        });
+        anyRestored = true;
+      }
+
+      const imageId = typeof ad.selectedImageId === "string" ? ad.selectedImageId.trim() : "";
+      const mimeType =
+        typeof ad.selectedImageMimeType === "string" && ad.selectedImageMimeType.trim()
+          ? ad.selectedImageMimeType.trim()
+          : "image/png";
+      if (imageId && isIndexedDbAvailable()) {
+        try {
+          const b64 = (await getImageFromDB(imageId)) || "";
+          if (b64) {
+            setSelectedImageBase64(b64);
+            setSelectedImagePreviewUrl(`data:${mimeType};base64,${b64}`);
+            anyRestored = true;
+          }
+        } catch (e) {
+          console.warn("OSA: workspace session restore — analyze image failed", e);
+        }
+      }
+
+      if (cancelled) return;
+      setHasRestoredWorkspaceSession(true);
+      if (anyRestored) {
+        setCreateDraftPersistStatus("restored");
+        window.setTimeout(() => {
+          setCreateDraftPersistStatus((s) => (s === "restored" ? "idle" : s));
+        }, 5200);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const isDark = theme === "dark";
@@ -1712,6 +1904,8 @@ export default function Home() {
       })
     );
     setDocumentStoreVersion((value) => value + 1);
+    createDraftDirtyRef.current = true;
+    window.setTimeout(() => persistWorkspaceSessionNowRef.current(), 0);
     setAnalysisSaveFeedback({ ok: true, message: "Анализ сохранён" });
     window.setTimeout(() => setAnalysisSaveFeedback(null), 6000);
   };
@@ -2068,6 +2262,10 @@ export default function Home() {
   useEffect(() => {
     if (!activeProjectKey) return;
     if (!isIndexedDbAvailable()) return;
+    if (skipNextSemanticIdbHydrationRef.current) {
+      skipNextSemanticIdbHydrationRef.current = false;
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -2327,6 +2525,18 @@ export default function Home() {
   }, [savedVisuals]);
 
   useEffect(() => {
+    const pk =
+      resultData && typeof resultData.projectKey === "string" ? String(resultData.projectKey).trim() : "";
+    if (!pk) return;
+    if (activeProjectKey === pk) return;
+    if (activeProjectKey == null) {
+      stableSessionProjectKeyRef.current = pk;
+      persistActiveProjectKey(pk);
+      setActiveProjectKey(pk);
+    }
+  }, [resultData, activeProjectKey]);
+
+  useEffect(() => {
     if (!activeProjectKey) return;
     const proj = projectList.find((p) => p.key === activeProjectKey);
     if (!proj?.items?.length) {
@@ -2398,15 +2608,17 @@ export default function Home() {
     const versionsAsc = getPromptVersionsForProject(activeProjectKey);
     const activeV = activeId ? versionsAsc.find((v) => v && String(v.id) === String(activeId)) : null;
     const savedPrompt = getStoredProjectPrompt(activeProjectKey);
-    setInteriorDescription(() => {
-      if (activeV && typeof activeV.text === "string" && normalizePromptText(activeV.text)) {
-        return activeV.text;
-      }
-      if (savedPrompt && savedPrompt.trim()) return savedPrompt;
-      if (brief) return brief;
-      return `Концепция «${proj.title}»`;
-    });
-  }, [activeProjectKey, projectList]);
+    if (!preferSessionInteriorDraftRef.current || !isGenerateMode) {
+      setInteriorDescription(() => {
+        if (activeV && typeof activeV.text === "string" && normalizePromptText(activeV.text)) {
+          return activeV.text;
+        }
+        if (savedPrompt && savedPrompt.trim()) return savedPrompt;
+        if (brief) return brief;
+        return `Концепция «${proj.title}»`;
+      });
+    }
+  }, [activeProjectKey, projectList, isGenerateMode]);
 
   useEffect(() => {
     if (!activeProjectKey || !selectedSessionVisualId) return;
@@ -2424,9 +2636,29 @@ export default function Home() {
     ) {
       return;
     }
+    if (resultData && resultDataMatchesActiveProject(resultData, activeProjectKey)) {
+      return;
+    }
+    if (
+      isGenerateMode &&
+      stableSessionProjectKeyRef.current &&
+      stableSessionProjectKeyRef.current === activeProjectKey &&
+      normalizePromptText(interiorDescription)
+    ) {
+      return;
+    }
     persistActiveProjectKey(null);
     setActiveProjectKey(null);
-  }, [projectList, activeProjectKey, isAnalyzeMode, semanticDraft, selectedImageId]);
+  }, [
+    projectList,
+    activeProjectKey,
+    isAnalyzeMode,
+    isGenerateMode,
+    semanticDraft,
+    selectedImageId,
+    resultData,
+    interiorDescription,
+  ]);
 
   useEffect(() => {
     setShowImagePromptDetails(false);
@@ -4369,15 +4601,25 @@ export default function Home() {
     const prompt = interiorDescription.trim();
     if (!prompt) return;
 
+    const reusePk =
+      (stableSessionProjectKeyRef.current && String(stableSessionProjectKeyRef.current).trim()) ||
+      (resultData?.projectKey && String(resultData.projectKey).trim()) ||
+      (activeProjectKey && String(activeProjectKey).trim()) ||
+      "";
+
     if (process.env.NODE_ENV === "development") {
       console.log("[OSA][generate] click");
       console.log("[OSA][generate] prompt length", prompt.length);
     }
 
+    createDraftDirtyRef.current = true;
+    if (workspaceSaveTimerRef.current) clearTimeout(workspaceSaveTimerRef.current);
+    persistWorkspaceSessionNowRef.current();
+
     setIsRunning(true);
     setGenerateError("");
     setResultData(null);
-    if (!activeProjectKey) {
+    if (!reusePk) {
       setSessionVisualGallery([]);
       setSelectedSessionVisualId(null);
     }
@@ -4416,9 +4658,16 @@ export default function Home() {
         throw new Error(serverMsg || friendlyError);
       }
 
-      const projectKey = newStableId();
+      const projectKey = reusePk || newStableId();
+      stableSessionProjectKeyRef.current = projectKey;
+      persistActiveProjectKey(projectKey);
+      setActiveProjectKey(projectKey);
       setResultData({ ...payload, projectKey });
       window.setTimeout(() => setIsGenerateResultVisible(true), 0);
+      createDraftDirtyRef.current = true;
+      window.setTimeout(() => {
+        persistWorkspaceSessionNowRef.current();
+      }, 0);
     } catch (error) {
       if (process.env.NODE_ENV === "development") {
         console.warn("[OSA][generate] failed", error);
@@ -4434,15 +4683,31 @@ export default function Home() {
         /failed to fetch|networkerror|load failed|network request failed/i.test(msg);
       setGenerateError(networkFail ? friendlyError : msg);
       setResultData(null);
+      window.setTimeout(() => {
+        persistWorkspaceSessionNowRef.current();
+      }, 0);
     } finally {
       setIsRunning(false);
     }
   };
 
   const handleStartNewProject = () => {
+    clearWorkspaceSessionEnvelope();
+    workspaceSessionEnvelopeRef.current = null;
+    stableSessionProjectKeyRef.current = "";
+    preferSessionInteriorDraftRef.current = false;
     persistActiveProjectKey(null);
     setActiveProjectKey(null);
     setMode("generate");
+    setInteriorDescription("");
+    setResultData(null);
+    setSessionVisualGallery([]);
+    setSelectedSessionVisualId(null);
+    setGenerateError("");
+    setAtmosphereChoice("architectural_white");
+    setIsGenerateResultVisible(false);
+    setImageError("");
+    setIsImageVisible(false);
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         document.getElementById("osa-workspace-anchor")?.scrollIntoView({
@@ -4573,8 +4838,11 @@ export default function Home() {
     let projectKey = activeProjectKey;
     if (!projectKey) {
       projectKey = newStableId();
+      stableSessionProjectKeyRef.current = projectKey;
       persistActiveProjectKey(projectKey);
       setActiveProjectKey(projectKey);
+    } else {
+      stableSessionProjectKeyRef.current = projectKey;
     }
 
     const width = selectedImageDimensions?.width || 0;
@@ -4651,9 +4919,10 @@ export default function Home() {
         const rows = await getSemanticAnalysesByProjectKey(projectKey, 10);
         setAnalyzeHistory(rows);
       }
+      createDraftDirtyRef.current = true;
+      window.setTimeout(() => persistWorkspaceSessionNowRef.current(), 0);
     } catch (e) {
       console.error(e);
-      setSemanticDraft(null);
       setAnalyzeSceneError("Не удалось проанализировать сцену");
     } finally {
       setIsRunning(false);
@@ -4663,6 +4932,12 @@ export default function Home() {
   const sessionContextAligned = Boolean(
     activeProjectKey && resultDataMatchesActiveProject(resultData, activeProjectKey)
   );
+
+  const createDraftMemorySummary = useMemo(() => {
+    const t = normalizePromptText(interiorDescription);
+    if (!t) return "";
+    return t.length > 140 ? `${t.slice(0, 140)}…` : t;
+  }, [interiorDescription]);
 
   const activeAnalysisRecord = useMemo(
     () => analyzeHistory.find((row) => row.id === activeAnalysisRecordId) || null,
@@ -4708,6 +4983,108 @@ export default function Home() {
     if (!linkageId) return null;
     return getBudgetDraftForAnalysisRecord(linkageId);
   }, [activeProjectKey, activeSavedAnalysisRecordId, selectedImageId, budgetDraftsVersion]);
+
+  persistWorkspaceSessionNowRef.current = () => {
+    if (!hasRestoredWorkspaceSession) return;
+    let pk =
+      (activeProjectKey && String(activeProjectKey).trim()) ||
+      (stableSessionProjectKeyRef.current && String(stableSessionProjectKeyRef.current).trim()) ||
+      "";
+    if (!pk && normalizePromptText(interiorDescription)) {
+      pk = newStableId();
+      stableSessionProjectKeyRef.current = pk;
+      persistActiveProjectKey(pk);
+      setActiveProjectKey(pk);
+    }
+    const nextEnvelope = buildWorkspaceSessionEnvelope({
+      prevEnvelope: workspaceSessionEnvelopeRef.current,
+      projectKey: pk || null,
+      activeMode: mode,
+      createDraft: {
+        interiorDescription,
+        atmosphereChoice,
+        resultData,
+        sessionVisualGallery,
+        selectedSessionVisualId,
+        activePromptVersionId,
+        isGenerateResultVisible,
+      },
+      analyzeDraft: {
+        selectedAnalysisMode,
+        resultAnalysisMode,
+        semanticDraft,
+        selectedImageFileName,
+        selectedImageMimeType,
+        selectedImageDimensions,
+        selectedImageId,
+        activeAnalysisRecordId,
+        activeSavedAnalysisRecordId,
+        savedDocumentSnapshot,
+        isAnalyzeResultVisible,
+      },
+      validateSemanticDraft,
+    });
+    workspaceSessionEnvelopeRef.current = nextEnvelope;
+    const ok = writeWorkspaceSessionEnvelope(nextEnvelope);
+    if (ok && createDraftDirtyRef.current) {
+      setCreateDraftPersistStatus("saved");
+      createDraftDirtyRef.current = false;
+      window.setTimeout(() => {
+        setCreateDraftPersistStatus((s) => (s === "saved" ? "idle" : s));
+      }, 2400);
+    }
+  };
+
+  useEffect(() => {
+    if (!hasRestoredWorkspaceSession) return undefined;
+    if (workspaceSaveTimerRef.current) clearTimeout(workspaceSaveTimerRef.current);
+    workspaceSaveTimerRef.current = setTimeout(() => {
+      persistWorkspaceSessionNowRef.current();
+    }, 420);
+    return () => {
+      if (workspaceSaveTimerRef.current) clearTimeout(workspaceSaveTimerRef.current);
+    };
+  }, [
+    hasRestoredWorkspaceSession,
+    mode,
+    activeProjectKey,
+    interiorDescription,
+    atmosphereChoice,
+    resultData,
+    sessionVisualGallery,
+    selectedSessionVisualId,
+    activePromptVersionId,
+    isGenerateResultVisible,
+    selectedAnalysisMode,
+    resultAnalysisMode,
+    semanticDraft,
+    selectedImageFileName,
+    selectedImageMimeType,
+    selectedImageDimensions,
+    selectedImageId,
+    activeAnalysisRecordId,
+    activeSavedAnalysisRecordId,
+    savedDocumentSnapshot,
+    isAnalyzeResultVisible,
+    documentStoreVersion,
+    budgetDraftsVersion,
+  ]);
+
+  const handleAtmosphereChoiceChange = (next) => {
+    try {
+      const v =
+        typeof next === "string" && ALTERNATE_KIND_KEYS.includes(next)
+          ? next
+          : normalizeAtmosphereChoiceStored(next);
+      setAtmosphereChoice(v);
+      createDraftDirtyRef.current = true;
+      setCreateDraftPersistStatus("dirty");
+    } catch (e) {
+      console.warn("OSA: atmosphere change failed", e);
+      setImageError("Не удалось применить атмосферу. Попробуйте ещё раз.");
+      window.setTimeout(() => setImageError(""), 4200);
+    }
+  };
 
   return (
     <main className="osa-main" style={mainStyle}>
@@ -4769,6 +5146,7 @@ export default function Home() {
                   ""
                 }
                 activeSemanticDraft={semanticDraft}
+                createDraftSummary={createDraftMemorySummary}
                 isDark={isDark}
                 isMobile={isMobile}
                 onOpenSavedRecord={openSavedAnalysisDocument}
@@ -4810,6 +5188,7 @@ export default function Home() {
                       aria-label={`Проект: ${p.title}`}
                       onClick={() => {
                         const next = activeProjectKey === p.key ? null : p.key;
+                        preferSessionInteriorDraftRef.current = false;
                         persistActiveProjectKey(next);
                         setActiveProjectKey(next);
                       }}
@@ -5034,19 +5413,37 @@ export default function Home() {
             <>
               <div style={workspaceGeneratePromptBlockStyle}>
                 <div style={{ ...workspaceLabelStyle, marginBottom: "12px" }}>Описание интерьера</div>
+                {createDraftPersistStatus !== "idle" ? (
+                  <div
+                    style={{
+                      marginBottom: "10px",
+                      fontSize: "12px",
+                      lineHeight: 1.45,
+                      color:
+                        createDraftPersistStatus === "dirty"
+                          ? isDark
+                            ? "rgba(243,200,120,0.85)"
+                            : "rgba(140,90,40,0.9)"
+                          : isDark
+                            ? "rgba(243,238,231,0.55)"
+                            : "rgba(110,106,102,0.82)",
+                    }}
+                  >
+                    {createDraftPersistStatus === "restored"
+                      ? "Восстановлено из черновика"
+                      : createDraftPersistStatus === "saved"
+                        ? "Черновик сохранён"
+                        : "Есть несохранённые изменения"}
+                  </div>
+                ) : null}
                 <textarea
                   className="osa-form-textarea"
                   value={interiorDescription}
                   onChange={(e) => {
                     setInteriorDescription(e.target.value);
-                    setResultData(null);
                     setGenerateError("");
-                    setSessionVisualGallery([]);
-                    setSelectedSessionVisualId(null);
-                    setImageError("");
-                    setIsImageVisible(false);
-                    setShowImagePromptDetails(false);
-                    setIsGenerateResultVisible(false);
+                    createDraftDirtyRef.current = true;
+                    setCreateDraftPersistStatus("dirty");
                   }}
                   placeholder="Например: квартира 45м², теплое дерево + мягкая геометрия, светлая база, минимум визуального шума, максимум хранения…"
                   style={textareaStyle}
@@ -5245,7 +5642,7 @@ export default function Home() {
                     <div style={alternateActionsClusterStyle}>
                       <AtmosphereDropdown
                         value={atmosphereChoice}
-                        onChange={setAtmosphereChoice}
+                        onChange={handleAtmosphereChoiceChange}
                         disabled={isImageRunning || isRunning}
                         isDark={isDark}
                       />
@@ -5923,7 +6320,7 @@ export default function Home() {
                     <div style={alternateActionsClusterStyle}>
                       <AtmosphereDropdown
                         value={atmosphereChoice}
-                        onChange={setAtmosphereChoice}
+                        onChange={handleAtmosphereChoiceChange}
                         disabled={isImageRunning || isRunning}
                         isDark={isDark}
                       />

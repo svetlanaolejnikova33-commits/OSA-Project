@@ -198,6 +198,7 @@ export function ProjectMemory({
   activeSceneLabel,
   activeSceneTimestamp,
   activeSemanticDraft,
+  createDraftSummary,
   isDark,
   isMobile = false,
   onOpenSavedRecord,
@@ -273,6 +274,32 @@ export function ProjectMemory({
         </div>
         <ModeBadges states={getAnalysisModeStates(activeSemanticDraft)} isDark={isDark} />
       </div>
+
+      {typeof createDraftSummary === "string" && createDraftSummary.trim() ? (
+        <div
+          style={{
+            padding: "12px",
+            borderRadius: "16px",
+            marginBottom: "14px",
+            border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+            background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.42)",
+          }}
+        >
+          <div style={{ fontSize: "12px", letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.6 }}>
+            Черновик «Создать интерьер»
+          </div>
+          <div
+            style={{
+              marginTop: "8px",
+              fontSize: "13px",
+              lineHeight: 1.45,
+              color: isDark ? "rgba(243,238,231,0.78)" : "rgba(43,43,43,0.88)",
+            }}
+          >
+            {createDraftSummary.trim()}
+          </div>
+        </div>
+      ) : null}
 
       <div
         style={{
