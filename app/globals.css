@@ -232,17 +232,20 @@ select {
   }
 
   .osa-analysis-panel {
+    display: block !important;
     width: 100% !important;
-    max-width: none !important;
+    max-width: 100% !important;
     min-width: 0 !important;
-    padding: 14px !important;
-    grid-template-columns: 1fr !important;
+    padding: 13px !important;
+    box-sizing: border-box !important;
+    text-align: left !important;
   }
 
   .osa-analysis-panel .osa-chip {
     white-space: normal !important;
     text-align: left !important;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal !important;
+    word-break: normal !important;
   }
 
   .osa-ai-fields-grid,

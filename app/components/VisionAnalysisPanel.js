@@ -83,40 +83,98 @@ function sortSpecificationGroups(groups) {
   });
 }
 
-function Section({ label, children, theme }) {
+/** Mobile accordion: these blocks start expanded. */
+const MOBILE_SECTION_DEFAULT_OPEN = new Set([
+  "mode-pro",
+  "mode-quick",
+  "mode-spec",
+  "space",
+  "zones",
+  "style-intent",
+  "style",
+  "summary",
+]);
+
+function Section({ label, children, theme, isMobile = false, sectionKey }) {
+  const defaultExpanded = sectionKey == null ? true : MOBILE_SECTION_DEFAULT_OPEN.has(sectionKey);
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  if (!isMobile) {
+    return (
+      <div
+        style={{
+          gridColumn: "1 / -1",
+          borderRadius: "14px",
+          padding: theme.cardPadding,
+          background: theme.cardBackground,
+          border: `1px solid ${theme.border}`,
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={labelStyle(theme, false)}>{label}</div>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
-        gridColumn: "1 / -1",
-        borderRadius: "14px",
-        padding: theme.cardPadding,
-        background: theme.cardBackground,
-        border: `1px solid ${theme.border}`,
+        width: "100%",
+        maxWidth: "100%",
         boxSizing: "border-box",
+        borderBottom: `1px solid ${theme.border}`,
       }}
     >
-      <div style={labelStyle(theme)}>{label}</div>
-      {children}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        style={{
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "10px",
+          padding: "10px 0 8px 0",
+          border: "none",
+          background: "transparent",
+          color: "inherit",
+          font: "inherit",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ ...labelStyle(theme, true), marginBottom: 0 }}>{label}</span>
+        <span aria-hidden style={{ fontSize: "12px", opacity: 0.6, flexShrink: 0 }}>
+          {expanded ? "−" : "+"}
+        </span>
+      </button>
+      {expanded ? (
+        <div style={{ paddingBottom: "12px", textAlign: "left", width: "100%", maxWidth: "100%" }}>{children}</div>
+      ) : null}
     </div>
   );
 }
 
-function labelStyle(theme) {
+function labelStyle(theme, isMobile = false) {
   return {
     fontSize: "12px",
-    letterSpacing: "0.10em",
+    letterSpacing: isMobile ? "0.05em" : "0.10em",
     textTransform: "uppercase",
     fontWeight: 600,
     color: theme.textSecondary,
-    marginBottom: "8px",
+    marginBottom: isMobile ? "0" : "8px",
   };
 }
 
-function valueStyle(theme) {
+function valueStyle(theme, isMobile = false) {
   return {
-    fontSize: "14px",
-    lineHeight: 1.55,
+    fontSize: isMobile ? "15px" : "14px",
+    lineHeight: isMobile ? 1.42 : 1.55,
     color: theme.textPrimary,
+    textAlign: isMobile ? "left" : undefined,
+    letterSpacing: isMobile ? "normal" : undefined,
   };
 }
 
@@ -129,20 +187,21 @@ function formatConfidence(value) {
 function Chips({ items, theme, isMobile = false }) {
   if (!Array.isArray(items) || !items.length) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: isMobile ? "6px" : "8px" }}>
       {items.map((item) => (
         <span
           key={String(item)}
           className="osa-chip"
           style={{
-            padding: isMobile ? "5px 8px" : "6px 10px",
+            padding: isMobile ? "6px 8px" : "6px 10px",
             borderRadius: "999px",
-            fontSize: isMobile ? "11px" : "12px",
+            fontSize: "12px",
             lineHeight: 1.25,
             border: `1px solid ${theme.chipBorder}`,
             background: theme.chipBackground,
             color: theme.chipText,
             whiteSpace: isMobile ? "normal" : "nowrap",
+            letterSpacing: isMobile ? "normal" : undefined,
           }}
         >
           {item}
@@ -152,11 +211,18 @@ function Chips({ items, theme, isMobile = false }) {
   );
 }
 
-function PaletteSwatches({ entries, theme }) {
+function PaletteSwatches({ entries, theme, isMobile = false }) {
+  const [showAll, setShowAll] = useState(false);
   if (!Array.isArray(entries) || !entries.length) return null;
+  const limit = isMobile ? 5 : entries.length;
+  const hiddenCount = entries.length - limit;
+  const visible = showAll || !isMobile ? entries : entries.slice(0, limit);
+  const sw = isMobile ? 36 : 36;
+  const gap = isMobile ? 8 : 10;
+
   return (
-    <div className="osa-palette-swatches" style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-      {entries.map((entry, index) => {
+    <div className="osa-palette-swatches" style={{ display: "flex", flexWrap: "wrap", gap, alignItems: "flex-start" }}>
+      {visible.map((entry, index) => {
         const key = `${entry.hex || "text"}-${entry.labelRu || index}`;
         const label = (entry.labelRu || entry.hex || "цвет").slice(0, 18);
         const swatchColor = entry.hex || "";
@@ -169,18 +235,18 @@ function PaletteSwatches({ entries, theme }) {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "4px",
-              minWidth: "52px",
-              maxWidth: "72px",
+              gap: "3px",
+              minWidth: isMobile ? "40px" : "52px",
+              maxWidth: isMobile ? "56px" : "72px",
             }}
           >
             {swatchColor ? (
               <span
                 aria-hidden="true"
                 style={{
-                  width: "36px",
-                  height: "36px",
-                  borderRadius: "10px",
+                  width: `${sw}px`,
+                  height: `${sw}px`,
+                  borderRadius: isMobile ? "9px" : "10px",
                   background: swatchColor,
                   border: lightSwatch ? `1px solid ${theme.swatchBorder}` : "1px solid rgba(0,0,0,0.08)",
                 }}
@@ -188,9 +254,9 @@ function PaletteSwatches({ entries, theme }) {
             ) : (
               <span
                 style={{
-                  width: "36px",
-                  height: "36px",
-                  borderRadius: "10px",
+                  width: `${sw}px`,
+                  height: `${sw}px`,
+                  borderRadius: isMobile ? "9px" : "10px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -202,23 +268,61 @@ function PaletteSwatches({ entries, theme }) {
                 txt
               </span>
             )}
-            <span
-              style={{
-                fontSize: "10px",
-                lineHeight: 1.3,
-                textAlign: "center",
-                color: theme.swatchLabel,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                width: "100%",
-              }}
-            >
-              {label}
-            </span>
+            {!isMobile ? (
+              <span
+                style={{
+                  fontSize: "10px",
+                  lineHeight: 1.3,
+                  textAlign: "center",
+                  color: theme.swatchLabel,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  width: "100%",
+                }}
+              >
+                {label}
+              </span>
+            ) : (
+              <span
+                style={{
+                  fontSize: "11px",
+                  lineHeight: 1.25,
+                  textAlign: "center",
+                  color: theme.swatchLabel,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  width: "100%",
+                  maxWidth: "100%",
+                }}
+              >
+                {label}
+              </span>
+            )}
           </div>
         );
       })}
+      {isMobile && hiddenCount > 0 && !showAll ? (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          style={{
+            alignSelf: "center",
+            marginTop: "4px",
+            padding: "6px 10px",
+            borderRadius: "999px",
+            border: `1px solid ${theme.border}`,
+            background: theme.chipBackground,
+            color: theme.chipText,
+            font: "inherit",
+            fontSize: "12px",
+            cursor: "pointer",
+          }}
+        >
+          ещё {hiddenCount}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -291,7 +395,7 @@ function paletteSourceLabel(source) {
   return source === "extracted" ? "Палитра: извлечена из изображения" : "Палитра: определена Vision";
 }
 
-function ColorLogicSection({ colorAnalysis, theme, text }) {
+function ColorLogicSection({ colorAnalysis, theme, text, isMobile = false }) {
   const display = getColorDisplay(colorAnalysis);
   if (
     !display.dominant.length &&
@@ -305,19 +409,30 @@ function ColorLogicSection({ colorAnalysis, theme, text }) {
   }
 
   return (
-    <Section label="Цветовая логика" theme={theme}>
-      <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary, fontSize: "12px" }}>
+    <Section label="Цветовая логика" theme={theme} isMobile={isMobile} sectionKey="color">
+      <div
+        style={{
+          ...text,
+          marginBottom: "8px",
+          color: theme.textSecondary,
+          fontSize: "12px",
+          textTransform: "none",
+          letterSpacing: isMobile ? "normal" : undefined,
+        }}
+      >
         {paletteSourceLabel(display.source)}
       </div>
-      {display.dominant.length ? <PaletteSwatches entries={display.dominant} theme={theme} /> : null}
+      {display.dominant.length ? <PaletteSwatches entries={display.dominant} theme={theme} isMobile={isMobile} /> : null}
       {display.accents.length ? (
         <div style={{ marginTop: "10px" }}>
-          <PaletteSwatches entries={display.accents} theme={theme} />
+          <PaletteSwatches entries={display.accents} theme={theme} isMobile={isMobile} />
         </div>
       ) : null}
-      {display.description ? <div style={{ ...text, marginTop: "10px" }}>{display.description}</div> : null}
+      {display.description ? (
+        <div style={{ ...text, marginTop: "10px", textTransform: "none", fontWeight: 400 }}>{display.description}</div>
+      ) : null}
       {display.warmth || display.brightness || display.contrast ? (
-        <div style={{ ...text, marginTop: "8px", color: theme.textSecondary }}>
+        <div style={{ ...text, marginTop: "8px", color: theme.textSecondary, textTransform: "none" }}>
           {[display.warmth, display.brightness, display.contrast].filter(Boolean).join(" · ")}
         </div>
       ) : null}
@@ -325,20 +440,21 @@ function ColorLogicSection({ colorAnalysis, theme, text }) {
   );
 }
 
-function EmptyModeState({ message, theme, revealStyle, activeMode }) {
+function EmptyModeState({ message, theme, revealStyle, activeMode, isMobile = false }) {
   return (
     <div
       style={{
         ...revealStyle,
         width: "100%",
         boxSizing: "border-box",
-        padding: theme.panelPadding,
-        borderRadius: activeMode === "quick" ? "14px" : "16px",
+        padding: isMobile ? "12px 14px" : theme.panelPadding,
+        borderRadius: isMobile ? "12px" : activeMode === "quick" ? "14px" : "16px",
         background: theme.background,
-        border: `1px solid ${theme.border}`,
+        border: isMobile ? "none" : `1px solid ${theme.border}`,
         color: theme.textSecondary,
-        fontSize: "14px",
-        lineHeight: 1.55,
+        fontSize: isMobile ? "15px" : "14px",
+        lineHeight: isMobile ? 1.42 : 1.55,
+        textAlign: isMobile ? "left" : undefined,
       }}
     >
       {message}
@@ -350,7 +466,7 @@ function formatRegistryFlag(value) {
   return value ? "да" : "нет";
 }
 
-function ConceptDNASection({ styleConsistency, theme, text }) {
+function ConceptDNASection({ styleConsistency, theme, text, isMobile = false }) {
   const conceptDNA = getConceptDNA(styleConsistency);
   if (
     !conceptDNA.styleCore &&
@@ -364,7 +480,7 @@ function ConceptDNASection({ styleConsistency, theme, text }) {
   }
 
   return (
-    <Section label="ДНК концепции" theme={theme}>
+    <Section label="ДНК концепции" theme={theme} isMobile={isMobile} sectionKey="concept-dna">
       {conceptDNA.styleCore ? <div style={text}>Стиль: {conceptDNA.styleCore}</div> : null}
       {conceptDNA.atmosphereCore ? (
         <div style={{ ...text, marginTop: "6px" }}>Атмосфера: {conceptDNA.atmosphereCore}</div>
@@ -380,7 +496,7 @@ function ConceptDNASection({ styleConsistency, theme, text }) {
       ) : null}
       {Array.isArray(conceptDNA.mustPreserve) && conceptDNA.mustPreserve.length ? (
         <div style={{ marginTop: "10px" }}>
-          <div style={{ ...text, marginBottom: "6px", color: theme.textSecondary, fontSize: "12px" }}>
+          <div style={{ ...text, marginBottom: "6px", color: theme.textSecondary, fontSize: "12px", textTransform: "none" }}>
             Что важно сохранить
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -396,25 +512,26 @@ function ConceptDNASection({ styleConsistency, theme, text }) {
   );
 }
 
-function EditableElementsSection({ editableObjects, theme, text }) {
+function EditableElementsSection({ editableObjects, theme, text, isMobile = false }) {
   const items = Array.isArray(editableObjects) ? editableObjects.slice(0, 6) : [];
   if (!items.length) return null;
   const sourceLabel = getLayerSourceLabel(editableObjects);
 
   return (
-    <Section label="Редактируемые элементы" theme={theme}>
+    <Section label="Редактируемые элементы" theme={theme} isMobile={isMobile} sectionKey="editable">
       {sourceLabel ? (
         <div style={{ ...text, fontSize: "11px", color: theme.textSecondary, marginBottom: "8px" }}>{sourceLabel}</div>
       ) : null}
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? "8px" : "10px" }}>
         {items.map((entry) => (
           <div
             key={entry.id}
             style={{
-              padding: "10px 12px",
-              borderRadius: "12px",
-              border: `1px solid ${theme.border}`,
-              background: theme.cardBackground,
+              padding: isMobile ? "8px 0" : "10px 12px",
+              borderRadius: isMobile ? "0" : "12px",
+              border: isMobile ? "none" : `1px solid ${theme.border}`,
+              background: isMobile ? "transparent" : theme.cardBackground,
+              borderBottom: isMobile ? `1px solid ${theme.border}` : undefined,
             }}
           >
             <div style={{ ...text, fontWeight: 600 }}>{entry.labelRu}</div>
@@ -482,6 +599,7 @@ function DesignMutationsSection({
   controlledRegenerationError,
   controlledRegenerationResult,
   onAnalyzeControlledVisual,
+  isMobile = false,
 }) {
   const items = Array.isArray(designMutations) ? designMutations : [];
   const [selectedMutationId, setSelectedMutationId] = useState("");
@@ -501,16 +619,17 @@ function DesignMutationsSection({
     preparedPackage?.promptRu || (selectedMutation ? getMutationPrompt(selectedMutation, semanticDraft) : "");
 
   return (
-    <Section label="Варианты развития концепции" theme={theme}>
+    <Section label="Варианты развития концепции" theme={theme} isMobile={isMobile} sectionKey="mutations">
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {items.map((mutation) => (
           <div
             key={mutation.id}
             style={{
-              padding: "12px",
-              borderRadius: "12px",
-              border: `1px solid ${selectedMutationId === mutation.id ? theme.accentBorder || theme.border : theme.border}`,
-              background: theme.cardBackground,
+              padding: isMobile ? "10px 0" : "12px",
+              borderRadius: isMobile ? "0" : "12px",
+              border: isMobile ? "none" : `1px solid ${selectedMutationId === mutation.id ? theme.accentBorder || theme.border : theme.border}`,
+              background: isMobile ? "transparent" : theme.cardBackground,
+              borderBottom: isMobile ? `1px solid ${theme.border}` : undefined,
             }}
           >
             <div style={{ ...text, fontWeight: 600 }}>{mutation.labelRu}</div>
@@ -562,10 +681,11 @@ function DesignMutationsSection({
         <div
           style={{
             marginTop: "12px",
-            padding: "12px",
-            borderRadius: "12px",
-            border: `1px dashed ${theme.border}`,
-            background: theme.cardBackground,
+            padding: isMobile ? "10px 0" : "12px",
+            borderRadius: isMobile ? "0" : "12px",
+            border: isMobile ? "none" : `1px dashed ${theme.border}`,
+            background: isMobile ? "transparent" : theme.cardBackground,
+            borderTop: isMobile ? `1px dashed ${theme.border}` : undefined,
           }}
         >
           <div style={{ ...text, fontSize: "12px", fontWeight: 600, marginBottom: "6px" }}>
@@ -634,10 +754,10 @@ function DesignMutationsSection({
                 <div
                   style={{
                     marginTop: "12px",
-                    padding: "10px",
-                    borderRadius: "10px",
-                    border: `1px solid ${theme.border}`,
-                    background: theme.cardBackground,
+                    padding: isMobile ? "10px 0" : "10px",
+                    borderRadius: isMobile ? "0" : "10px",
+                    border: isMobile ? "none" : `1px solid ${theme.border}`,
+                    background: isMobile ? "transparent" : theme.cardBackground,
                   }}
                 >
                   <div style={{ ...text, fontSize: "12px", fontWeight: 600 }}>Controlled-итерация создана</div>
@@ -692,7 +812,7 @@ function DesignMutationsSection({
   );
 }
 
-function SceneSpatialMapSection({ sceneGraph, theme, text }) {
+function SceneSpatialMapSection({ sceneGraph, theme, text, isMobile = false }) {
   const zones = Array.isArray(sceneGraph?.zones)
     ? sceneGraph.zones.filter((zone) => zone.id !== "unknown_zone").slice(0, 4)
     : [];
@@ -706,7 +826,7 @@ function SceneSpatialMapSection({ sceneGraph, theme, text }) {
   const resolveLabel = (id) => objectLabelById[id] || zoneLabelById[id] || id;
 
   return (
-    <Section label="Пространственная карта сцены" theme={theme}>
+    <Section label="Пространственная карта сцены" theme={theme} isMobile={isMobile} sectionKey="spatial">
       {sourceLabel ? (
         <div style={{ ...text, fontSize: "11px", color: theme.textSecondary, marginBottom: "8px" }}>{sourceLabel}</div>
       ) : null}
@@ -752,14 +872,14 @@ function SceneSpatialMapSection({ sceneGraph, theme, text }) {
   );
 }
 
-function PotentialBrandsSection({ budgetDraft, theme, text }) {
+function PotentialBrandsSection({ budgetDraft, theme, text, isMobile = false }) {
   const groups = Array.isArray(budgetDraft?.normalizedSpecGroups)
     ? budgetDraft.normalizedSpecGroups.filter((entry) => asArray(entry?.supplierCandidates?.matchedBrands).length)
     : [];
   if (!groups.length) return null;
 
   return (
-    <Section label="Потенциальные бренды" theme={theme}>
+    <Section label="Потенциальные бренды" theme={theme} isMobile={isMobile} sectionKey="brands">
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {groups.map((entry) => {
           const title = entry.parentLabelRu ? `${entry.parentLabelRu} / ${entry.labelRu}` : entry.labelRu;
@@ -768,10 +888,11 @@ function PotentialBrandsSection({ budgetDraft, theme, text }) {
             <div
               key={`${entry.registryCategoryId}-brands`}
               style={{
-                padding: "10px 12px",
-                borderRadius: "12px",
-                border: `1px solid ${theme.border}`,
-                background: theme.cardBackground,
+                padding: isMobile ? "8px 0" : "10px 12px",
+                borderRadius: isMobile ? "0" : "12px",
+                border: isMobile ? "none" : `1px solid ${theme.border}`,
+                background: isMobile ? "transparent" : theme.cardBackground,
+                borderBottom: isMobile ? `1px solid ${theme.border}` : undefined,
               }}
             >
               <div style={{ ...text, fontWeight: 600 }}>{title}</div>
@@ -810,13 +931,13 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text }) {
+function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false }) {
   const groups = sortSpecificationGroups(budgetDraft?.groups || []);
   const normalizedGroups = Array.isArray(budgetDraft?.normalizedSpecGroups)
     ? budgetDraft.normalizedSpecGroups
     : [];
   return (
-    <Section label="Черновик сметы" theme={theme}>
+    <Section label="Черновик сметы" theme={theme} isMobile={isMobile} sectionKey="budget">
       {!budgetDraft ? (
         <button
           type="button"
@@ -861,10 +982,11 @@ function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text }) {
                     <div
                       key={`${entry.registryCategoryId}-${entry.sourceText || title}`}
                       style={{
-                        padding: "10px 12px",
-                        borderRadius: "12px",
-                        border: `1px solid ${theme.border}`,
-                        background: theme.cardBackground,
+                        padding: isMobile ? "8px 0" : "10px 12px",
+                        borderRadius: isMobile ? "0" : "12px",
+                        border: isMobile ? "none" : `1px solid ${theme.border}`,
+                        background: isMobile ? "transparent" : theme.cardBackground,
+                        borderBottom: isMobile ? `1px solid ${theme.border}` : undefined,
                       }}
                     >
                       <div style={{ ...text, fontWeight: 600 }}>{title}</div>
@@ -900,9 +1022,9 @@ function withMobileTheme(theme, isMobile) {
   if (!isMobile) return theme;
   return {
     ...theme,
-    panelPadding: "10px",
-    cardPadding: "10px",
-    sectionGap: "8px",
+    panelPadding: "13px",
+    cardPadding: "0px",
+    sectionGap: "0px",
   };
 }
 
@@ -927,7 +1049,7 @@ export function VisionAnalysisPanel({
 
   const analysisMode = normalizeAnalysisMode(activeMode || semanticDraft.analysisMode);
   const theme = withMobileTheme(getSafeAnalysisTheme(semanticDraft, isDark, analysisMode), isMobile);
-  const text = valueStyle(theme);
+  const text = valueStyle(theme, isMobile);
 
   if (!hasSemanticDraftForMode(semanticDraft, analysisMode)) {
     return (
@@ -936,6 +1058,7 @@ export function VisionAnalysisPanel({
         theme={theme}
         revealStyle={revealStyle}
         activeMode={analysisMode}
+        isMobile={isMobile}
       />
     );
   }
@@ -944,11 +1067,21 @@ export function VisionAnalysisPanel({
   const pro = semanticDraft.proAnalysis || {};
   const spec = semanticDraft.specAnalysis || {};
 
-  if (analysisMode === "quick") {
-    return (
-      <div
-        className="osa-analysis-panel"
-        style={{
+  const panelShell = (desktopRadius) =>
+    isMobile
+      ? {
+          ...revealStyle,
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
+          display: "block",
+          padding: theme.panelPadding,
+          borderRadius: "12px",
+          background: theme.background,
+          border: `1px solid ${theme.border}`,
+        }
+      : {
           ...revealStyle,
           width: "100%",
           maxWidth: "100%",
@@ -958,16 +1091,21 @@ export function VisionAnalysisPanel({
           gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
           gap: theme.sectionGap,
           padding: theme.panelPadding,
-          borderRadius: "14px",
+          borderRadius: desktopRadius,
           background: theme.background,
           border: `1px solid ${theme.border}`,
-        }}
-      >
-        <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.quick}`} theme={theme}>
-          <div style={{ ...text, fontSize: "13px", color: theme.textSecondary }}>Быстрый творческий разбор сцены</div>
+        };
+
+  if (analysisMode === "quick") {
+    return (
+      <div className="osa-analysis-panel" style={panelShell("14px")}>
+        <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.quick}`} theme={theme} isMobile={isMobile} sectionKey="mode-quick">
+          <div style={{ ...text, fontSize: "13px", color: theme.textSecondary, textTransform: "none", letterSpacing: "normal" }}>
+            Быстрый творческий разбор сцены
+          </div>
         </Section>
         {quick.spaceType?.labelRu || quick.spaceType?.value ? (
-          <Section label="Назначение помещения" theme={theme}>
+          <Section label="Назначение помещения" theme={theme} isMobile={isMobile} sectionKey="space">
             <div style={{ ...text, fontSize: "15px", fontWeight: 600 }}>
               {quick.spaceType.labelRu || quick.spaceType.value}
               {formatConfidence(quick.spaceType.confidence) ? ` · ${formatConfidence(quick.spaceType.confidence)}` : ""}
@@ -975,7 +1113,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {quick.styleAnalysis?.labelRu || quick.styleAnalysis?.primary ? (
-          <Section label="Стиль" theme={theme}>
+          <Section label="Стиль" theme={theme} isMobile={isMobile} sectionKey="style">
             <div style={{ ...text, marginBottom: "8px" }}>
               {quick.styleAnalysis.labelRu || quick.styleAnalysis.primary}
               {formatConfidence(quick.styleAnalysis.confidence) ? ` · ${formatConfidence(quick.styleAnalysis.confidence)}` : ""}
@@ -986,13 +1124,13 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {quick.atmosphereRu ? (
-          <Section label="Атмосфера" theme={theme}>
+          <Section label="Атмосфера" theme={theme} isMobile={isMobile} sectionKey="atmosphere">
             <div style={text}>{quick.atmosphereRu}</div>
           </Section>
         ) : null}
-        <ColorLogicSection colorAnalysis={quick.colorAnalysis} theme={theme} text={text} />
+        <ColorLogicSection colorAnalysis={quick.colorAnalysis} theme={theme} text={text} isMobile={isMobile} />
         {quick.designIntent?.summaryRu || quick.designIntent?.emotionalEffectRu ? (
-          <Section label="Краткий замысел" theme={theme}>
+          <Section label="Краткий замысел" theme={theme} isMobile={isMobile} sectionKey="summary">
             {quick.designIntent.summaryRu ? <div style={{ ...text, marginBottom: "8px" }}>{quick.designIntent.summaryRu}</div> : null}
             {quick.designIntent.emotionalEffectRu ? (
               <div style={{ ...text, color: theme.textSecondary }}>{quick.designIntent.emotionalEffectRu}</div>
@@ -1005,28 +1143,14 @@ export function VisionAnalysisPanel({
 
   if (analysisMode === "pro") {
     return (
-      <div
-        className="osa-analysis-panel"
-        style={{
-          ...revealStyle,
-          width: "100%",
-          maxWidth: "100%",
-          minWidth: 0,
-          boxSizing: "border-box",
-          display: "grid",
-          gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-          gap: theme.sectionGap,
-          padding: theme.panelPadding,
-          borderRadius: "16px",
-          background: theme.background,
-          border: `1px solid ${theme.border}`,
-        }}
-      >
-        <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.pro}`} theme={theme}>
-          <div style={{ ...text, fontSize: "13px", color: theme.textSecondary }}>Профессиональная интерьерная карта</div>
+      <div className="osa-analysis-panel" style={panelShell("16px")}>
+        <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.pro}`} theme={theme} isMobile={isMobile} sectionKey="mode-pro">
+          <div style={{ ...text, fontSize: "13px", color: theme.textSecondary, textTransform: "none", letterSpacing: "normal" }}>
+            Профессиональная интерьерная карта
+          </div>
         </Section>
         {pro.spaceType?.labelRu || pro.spaceType?.value ? (
-          <Section label="Назначение помещения" theme={theme}>
+          <Section label="Назначение помещения" theme={theme} isMobile={isMobile} sectionKey="space">
             <div style={{ ...text, fontSize: "15px", fontWeight: 600 }}>
               {pro.spaceType.labelRu || pro.spaceType.value}
               {formatConfidence(pro.spaceType.confidence) ? ` · ${formatConfidence(pro.spaceType.confidence)}` : ""}
@@ -1034,7 +1158,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {Array.isArray(pro.functionalZones) && pro.functionalZones.length ? (
-          <Section label="Функциональные зоны" theme={theme}>
+          <Section label="Функциональные зоны" theme={theme} isMobile={isMobile} sectionKey="zones">
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {pro.functionalZones.map((zone) => (
                 <div key={`${zone.type}-${zone.labelRu}`} style={text}>
@@ -1050,14 +1174,14 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {pro.atmosphereRu ? (
-          <Section label="Атмосфера" theme={theme}>
+          <Section label="Атмосфера" theme={theme} isMobile={isMobile} sectionKey="atmosphere">
             <div style={text}>{pro.atmosphereRu}</div>
           </Section>
         ) : null}
         {pro.designIntent?.summaryRu ||
         pro.designIntent?.emotionalEffectRu ||
         (Array.isArray(pro.designIntent?.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length) ? (
-          <Section label="Стиль и замысел" theme={theme}>
+          <Section label="Стиль и замысел" theme={theme} isMobile={isMobile} sectionKey="style-intent">
             {pro.styleAnalysis?.labelRu || pro.styleAnalysis?.primary ? (
               <div style={{ ...text, marginBottom: "8px" }}>
                 {pro.styleAnalysis.labelRu || pro.styleAnalysis.primary}
@@ -1073,13 +1197,13 @@ export function VisionAnalysisPanel({
             ) : null}
           </Section>
         ) : null}
-        <ColorLogicSection colorAnalysis={pro.colorAnalysis} theme={theme} text={text} />
+        <ColorLogicSection colorAnalysis={pro.colorAnalysis} theme={theme} text={text} isMobile={isMobile} />
         {pro.lightingAnalysis &&
         (pro.lightingAnalysis.overallLightingMood ||
           (Array.isArray(pro.lightingAnalysis.technicalNotes) && pro.lightingAnalysis.technicalNotes.length) ||
           (Array.isArray(pro.lightingAnalysis.artificialLight) && pro.lightingAnalysis.artificialLight.length) ||
           pro.lightingAnalysis.naturalLight?.present) ? (
-          <Section label="Свет" theme={theme}>
+          <Section label="Свет" theme={theme} isMobile={isMobile} sectionKey="light">
             {pro.lightingAnalysis.naturalLight ? (
               <div style={{ ...text, marginBottom: "8px" }}>
                 {[
@@ -1116,7 +1240,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {hasProMaterialAnalysis(pro.materialAnalysis) ? (
-          <Section label="Материалы" theme={theme}>
+          <Section label="Материалы" theme={theme} isMobile={isMobile} sectionKey="materials">
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {PRO_MATERIAL_GROUP_KEYS.map((key) => {
                 const label = MATERIAL_GROUP_LABELS_RU[key];
@@ -1139,7 +1263,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {Array.isArray(pro.furnitureAnalysis) && pro.furnitureAnalysis.length ? (
-          <Section label="Мебель" theme={theme}>
+          <Section label="Мебель" theme={theme} isMobile={isMobile} sectionKey="furniture">
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {pro.furnitureAnalysis.map((item) => (
                 <div key={`${item.type}-${item.labelRu}-${item.position}`} style={text}>
@@ -1156,7 +1280,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {Array.isArray(pro.textileAnalysis) && pro.textileAnalysis.length ? (
-          <Section label="Текстиль" theme={theme}>
+          <Section label="Текстиль" theme={theme} isMobile={isMobile} sectionKey="textile">
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {pro.textileAnalysis.map((item) => (
                 <div key={`${item.type}-${item.labelRu}`} style={text}>
@@ -1171,7 +1295,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {hasSurfaceBlock(pro.ceilingAnalysis, pro.wallAnalysis, pro.floorAnalysis, []) ? (
-          <Section label="Отделка" theme={theme}>
+          <Section label="Отделка" theme={theme} isMobile={isMobile} sectionKey="surfaces">
             {pro.ceilingAnalysis?.labelRu || pro.ceilingAnalysis?.type ? (
               <div style={{ ...text, marginBottom: "8px" }}>
                 Потолок: {pro.ceilingAnalysis.labelRu || pro.ceilingAnalysis.type}
@@ -1199,7 +1323,7 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {Array.isArray(pro.decorAnalysis) && pro.decorAnalysis.length ? (
-          <Section label="Декор" theme={theme}>
+          <Section label="Декор" theme={theme} isMobile={isMobile} sectionKey="decor">
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {pro.decorAnalysis.map((item) => (
                 <div key={`${item.type}-${item.labelRu}`} style={text}>
@@ -1212,13 +1336,13 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         {Array.isArray(pro.designIntent?.whatMustBePreserved) && pro.designIntent.whatMustBePreserved.length ? (
-          <Section label="Что важно сохранить" theme={theme}>
+          <Section label="Что важно сохранить" theme={theme} isMobile={isMobile} sectionKey="preserve">
             <Chips items={pro.designIntent.whatMustBePreserved} theme={theme} isMobile={isMobile} />
           </Section>
         ) : null}
-        <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} />
-        <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} />
-        <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} />
+        <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
+        <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
+        <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
         <DesignMutationsSection
           designMutations={semanticDraft.designMutations}
           generationPackages={semanticDraft.generationPackages}
@@ -1233,37 +1357,24 @@ export function VisionAnalysisPanel({
           controlledRegenerationError={controlledRegenerationError}
           controlledRegenerationResult={controlledRegenerationResult}
           onAnalyzeControlledVisual={onAnalyzeControlledVisual}
+          isMobile={isMobile}
         />
       </div>
     );
   }
 
   return (
-    <div
-      className="osa-analysis-panel"
-      style={{
-        ...revealStyle,
-        width: "100%",
-        maxWidth: "100%",
-        minWidth: 0,
-        boxSizing: "border-box",
-        display: "grid",
-        gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-        gap: theme.sectionGap,
-        padding: theme.panelPadding,
-        borderRadius: "16px",
-        background: theme.background,
-        border: `1px solid ${theme.border}`,
-      }}
-    >
-      <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.spec}`} theme={theme}>
-                <div style={{ ...text, fontSize: "13px", color: theme.textSecondary }}>Подготовка к SKU, BIM и смете</div>
-          <div style={{ ...text, marginTop: "8px", color: theme.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
-            Черновая спецификация по изображению. Точные артикулы, размеры и цены появятся после подключения каталогов и BIM-данных.
-          </div>
+    <div className="osa-analysis-panel" style={panelShell("16px")}>
+      <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.spec}`} theme={theme} isMobile={isMobile} sectionKey="mode-spec">
+        <div style={{ ...text, fontSize: "13px", color: theme.textSecondary, textTransform: "none", letterSpacing: "normal" }}>
+          Подготовка к SKU, BIM и смете
+        </div>
+        <div style={{ ...text, marginTop: "8px", color: theme.textSecondary, fontSize: "12px", lineHeight: 1.5, textTransform: "none" }}>
+          Черновая спецификация по изображению. Точные артикулы, размеры и цены появятся после подключения каталогов и BIM-данных.
+        </div>
       </Section>
       {Array.isArray(spec.functionalZones) && spec.functionalZones.length ? (
-        <Section label="Функциональные зоны" theme={theme}>
+        <Section label="Функциональные зоны" theme={theme} isMobile={isMobile} sectionKey="zones">
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {spec.functionalZones.map((zone) => (
               <div key={`${zone.type}-${zone.labelRu}`} style={text}>
@@ -1276,7 +1387,7 @@ export function VisionAnalysisPanel({
         </Section>
       ) : null}
       {Array.isArray(spec.supplierCategories) && spec.supplierCategories.length ? (
-        <Section label="Категории поставщиков" theme={theme}>
+        <Section label="Категории поставщиков" theme={theme} isMobile={isMobile} sectionKey="supplier-categories">
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {spec.supplierCategories.map((item) => (
               <div key={`supplier-${item.category}-${item.reason}`} style={text}>
@@ -1289,7 +1400,7 @@ export function VisionAnalysisPanel({
         </Section>
       ) : null}
       {Array.isArray(spec.specificationGroups) && spec.specificationGroups.length ? (
-        <Section label="Группы спецификации" theme={theme}>
+        <Section label="Группы спецификации" theme={theme} isMobile={isMobile} sectionKey="spec-groups-intro">
           <div style={{ ...text, marginBottom: "10px", color: theme.textSecondary }}>
             {spec.specificationGroups.length} групп для сметы, BIM и подбора SKU
           </div>
@@ -1297,7 +1408,13 @@ export function VisionAnalysisPanel({
       ) : null}
       {Array.isArray(spec.specificationGroups) && spec.specificationGroups.length
         ? sortSpecificationGroups(spec.specificationGroups).map((group) => (
-            <Section key={group.group} label={group.group} theme={theme}>
+            <Section
+              key={group.group}
+              label={group.group}
+              theme={theme}
+              isMobile={isMobile}
+              sectionKey={`spec-group-${String(group.group || "g").replace(/\s+/g, "-")}`}
+            >
               <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary, fontSize: "12px" }}>
                 {[
                   group.priority ? `приоритет: ${PRIORITY_LABELS_RU[group.priority] || group.priority}` : "",
@@ -1318,7 +1435,7 @@ export function VisionAnalysisPanel({
           ))
         : null}
       {Array.isArray(spec.productCategories) && spec.productCategories.length ? (
-        <Section label="Потенциальные позиции сметы" theme={theme}>
+        <Section label="Потенциальные позиции сметы" theme={theme} isMobile={isMobile} sectionKey="product-categories">
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {spec.productCategories.map((item) => (
               <div key={`${item.category}-${item.reason}`} style={text}>
@@ -1331,7 +1448,7 @@ export function VisionAnalysisPanel({
         </Section>
       ) : null}
       {Array.isArray(spec.replacementCandidates) && spec.replacementCandidates.length ? (
-        <Section label="Кандидаты для замены" theme={theme}>
+        <Section label="Кандидаты для замены" theme={theme} isMobile={isMobile} sectionKey="replacement">
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {spec.replacementCandidates.map((item) => (
               <div key={`${item.target}-${item.category}`} style={text}>
@@ -1346,18 +1463,18 @@ export function VisionAnalysisPanel({
         </Section>
       ) : null}
       {Array.isArray(spec.procurementNotes) && spec.procurementNotes.length ? (
-        <Section label="Заметки для SKU" theme={theme}>
+        <Section label="Заметки для SKU" theme={theme} isMobile={isMobile} sectionKey="procurement-notes">
           <Chips items={spec.procurementNotes} theme={theme} isMobile={isMobile} />
         </Section>
       ) : null}
       {Array.isArray(spec.whatMustBePreserved) && spec.whatMustBePreserved.length ? (
-        <Section label="Что важно сохранить" theme={theme}>
+        <Section label="Что важно сохранить" theme={theme} isMobile={isMobile} sectionKey="preserve-spec">
           <Chips items={spec.whatMustBePreserved} theme={theme} isMobile={isMobile} />
         </Section>
       ) : null}
-      <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} />
-      <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} />
-      <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} />
+      <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
+      <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
+      <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
       <DesignMutationsSection
         designMutations={semanticDraft.designMutations}
         generationPackages={semanticDraft.generationPackages}
@@ -1372,14 +1489,16 @@ export function VisionAnalysisPanel({
         controlledRegenerationError={controlledRegenerationError}
         controlledRegenerationResult={controlledRegenerationResult}
         onAnalyzeControlledVisual={onAnalyzeControlledVisual}
+        isMobile={isMobile}
       />
       <BudgetDraftSection
         budgetDraft={budgetDraft}
         onCreateBudgetDraft={onCreateBudgetDraft}
         theme={theme}
         text={text}
+        isMobile={isMobile}
       />
-      <PotentialBrandsSection budgetDraft={budgetDraft} theme={theme} text={text} />
+      <PotentialBrandsSection budgetDraft={budgetDraft} theme={theme} text={text} isMobile={isMobile} />
     </div>
   );
 }

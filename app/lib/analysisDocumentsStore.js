@@ -21,19 +21,21 @@ export function readStoredAnalysisRecords() {
 }
 
 export function writeStoredAnalysisRecords(list) {
-  if (typeof localStorage === "undefined") return;
+  if (typeof localStorage === "undefined") return false;
   try {
     localStorage.setItem(OSA_ANALYSIS_RECORDS_KEY, JSON.stringify(list));
+    return true;
   } catch (e) {
     console.warn("OSA: analysis records write failed", e);
+    return false;
   }
 }
 
 export function upsertAnalysisRecord(record) {
   if (!record?.id) return null;
   const next = [record, ...readStoredAnalysisRecords().filter((row) => row && row.id !== record.id)];
-  writeStoredAnalysisRecords(next);
-  return record;
+  const ok = writeStoredAnalysisRecords(next);
+  return ok ? record : null;
 }
 
 export function readAnalysisRecordsForProject(projectKey) {

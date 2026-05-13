@@ -1393,6 +1393,7 @@ export default function Home() {
   const [activeSavedAnalysisRecordId, setActiveSavedAnalysisRecordId] = useState("");
   const [savedDocumentSnapshot, setSavedDocumentSnapshot] = useState("");
   const [documentStoreVersion, setDocumentStoreVersion] = useState(0);
+  const [analysisSaveFeedback, setAnalysisSaveFeedback] = useState(null);
   const [budgetDraftsVersion, setBudgetDraftsVersion] = useState(0);
   const [devAnalysisScenarioType, setDevAnalysisScenarioType] = useState("");
   const [isAnalyzeDropActive, setIsAnalyzeDropActive] = useState(false);
@@ -1641,14 +1642,35 @@ export default function Home() {
   };
 
   const handleSaveAnalysisDocument = () => {
-    if (!semanticDraft || !activeProjectKey) return;
+    setAnalysisSaveFeedback(null);
+    if (!semanticDraft) {
+      setAnalysisSaveFeedback({ ok: false, message: "Нет данных анализа для сохранения." });
+      return;
+    }
+    let projectKey = activeProjectKey;
+    if (!projectKey && typeof selectedImageId === "string" && selectedImageId.startsWith("analysis:")) {
+      const parts = selectedImageId.split(":");
+      if (parts.length >= 3 && parts[1]) projectKey = parts[1];
+    }
+    if (!projectKey) {
+      setAnalysisSaveFeedback({
+        ok: false,
+        message: "Не удалось определить проект. Нажмите «Анализировать интерьер» ещё раз или выберите проект в списке.",
+      });
+      return;
+    }
+    if (!activeProjectKey && projectKey) {
+      persistActiveProjectKey(projectKey);
+      setActiveProjectKey(projectKey);
+    }
+
     const now = new Date().toISOString();
     const existing = activeSavedAnalysisRecordId ? getAnalysisRecordById(activeSavedAnalysisRecordId) : null;
     const recordId = existing?.id || newStableId();
     const sourceImageId = selectedImageId || existing?.sourceImageId || "";
     const record = {
       id: recordId,
-      projectKey: activeProjectKey,
+      projectKey,
       sourceImageId,
       sourceImageName: selectedImageFileName || existing?.sourceImageName || "",
       sourceImageMimeType: selectedImageMimeType || existing?.sourceImageMimeType || "image/png",
@@ -1662,7 +1684,22 @@ export default function Home() {
       title: buildAnalysisRecordTitle(semanticDraft, selectedImageFileName),
       status: "saved",
     };
-    upsertAnalysisRecord(record);
+    try {
+      const stored = upsertAnalysisRecord(record);
+      if (!stored) {
+        setAnalysisSaveFeedback({
+          ok: false,
+          message: "Не удалось записать анализ (ошибка хранилища). Проверьте место в браузере и настройки приватности.",
+        });
+        return;
+      }
+    } catch (e) {
+      setAnalysisSaveFeedback({
+        ok: false,
+        message: e?.message || "Не удалось сохранить анализ.",
+      });
+      return;
+    }
     if (sourceImageId) {
       relinkBudgetDraftsFromPending(`pending:${sourceImageId}`, recordId);
     }
@@ -1675,6 +1712,8 @@ export default function Home() {
       })
     );
     setDocumentStoreVersion((value) => value + 1);
+    setAnalysisSaveFeedback({ ok: true, message: "Анализ сохранён" });
+    window.setTimeout(() => setAnalysisSaveFeedback(null), 6000);
   };
 
   const handlePrepareGenerationPackage = (mutation) => {
@@ -2377,9 +2416,17 @@ export default function Home() {
   useEffect(() => {
     if (!activeProjectKey) return;
     if (projectList.some((p) => p.key === activeProjectKey)) return;
+    if (
+      isAnalyzeMode &&
+      semanticDraft &&
+      typeof selectedImageId === "string" &&
+      selectedImageId.startsWith(`analysis:${activeProjectKey}:`)
+    ) {
+      return;
+    }
     persistActiveProjectKey(null);
     setActiveProjectKey(null);
-  }, [projectList, activeProjectKey]);
+  }, [projectList, activeProjectKey, isAnalyzeMode, semanticDraft, selectedImageId]);
 
   useEffect(() => {
     setShowImagePromptDetails(false);
@@ -3039,6 +3086,7 @@ export default function Home() {
     marginTop: isMobile ? "6px" : "8px",
     fontSize: isMobile ? "14px" : "15px",
     lineHeight: "1.5",
+    textAlign: isMobile ? "left" : undefined,
     color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.9)",
   };
 
@@ -3047,6 +3095,7 @@ export default function Home() {
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
+    textAlign: isMobile ? "left" : undefined,
   };
 
   const aiEmptyStateStyle = {
@@ -3255,7 +3304,7 @@ export default function Home() {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
+    alignItems: isMobile ? "stretch" : "center",
     gap: "10px",
     marginTop: workspaceNarrow ? "2px" : "4px",
   };
@@ -3263,9 +3312,19 @@ export default function Home() {
   const analyzeResultModuleStyle = {
     ...aiResultModuleStyle,
     marginTop: workspaceNarrow ? "8px" : "12px",
-    borderRadius: "16px",
-    border: isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid rgba(0,0,0,0.03)",
-    boxShadow: isDark ? "none" : "0 4px 16px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.48)",
+    borderRadius: isMobile ? "12px" : "16px",
+    border: isMobile
+      ? isDark
+        ? "1px solid rgba(255,255,255,0.06)"
+        : "1px solid rgba(0,0,0,0.06)"
+      : isDark
+        ? "1px solid rgba(255,255,255,0.07)"
+        : "1px solid rgba(0,0,0,0.03)",
+    boxShadow: isMobile
+      ? "none"
+      : isDark
+        ? "none"
+        : "0 4px 16px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.48)",
   };
 
   const uploadZoneStyle = analyzeUploadZoneEmptyStyle;
@@ -4490,6 +4549,7 @@ export default function Home() {
     setIsRunning(true);
     setAnalyzeSceneError("");
     setIsAnalyzeResultVisible(false);
+    setAnalysisSaveFeedback(null);
 
     try {
       const createdAt = new Date().toISOString();
@@ -6286,7 +6346,7 @@ export default function Home() {
                   display: "flex",
                   flexWrap: "wrap",
                   gap: "8px",
-                  justifyContent: "center",
+                  justifyContent: isMobile ? "flex-start" : "center",
                   marginBottom: "4px",
                 }}
               >
@@ -6327,6 +6387,8 @@ export default function Home() {
                   marginBottom: "4px",
                   fontSize: "12px",
                   lineHeight: 1.45,
+                  textAlign: isMobile ? "left" : "center",
+                  alignSelf: isMobile ? "stretch" : undefined,
                   color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.88)",
                 }}
               >
@@ -6367,24 +6429,33 @@ export default function Home() {
                     <div
                       style={{
                         display: "flex",
+                        flexDirection: isMobile ? "column" : "row",
                         flexWrap: "wrap",
-                        gap: "10px",
-                        alignItems: "center",
+                        gap: isMobile ? "8px" : "10px",
+                        alignItems: isMobile ? "stretch" : "center",
                         marginTop: "10px",
+                        position: "relative",
+                        zIndex: 2,
                       }}
                     >
                       <span
                         style={{
                           fontSize: "12px",
                           lineHeight: 1.45,
+                          textAlign: isMobile ? "left" : undefined,
                           color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.88)",
                         }}
                       >
-                        {analysisSaveStatusLabel}
+                        {analysisSaveFeedback?.ok
+                          ? analysisSaveFeedback.message
+                          : analysisSaveStatusLabel}
                       </span>
                       <button
                         type="button"
-                        onClick={handleSaveAnalysisDocument}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSaveAnalysisDocument();
+                        }}
                         disabled={isRunning}
                         style={{
                           padding: "8px 12px",
@@ -6397,10 +6468,29 @@ export default function Home() {
                           background: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.85)",
                           color: "inherit",
                           font: "inherit",
+                          alignSelf: isMobile ? "stretch" : undefined,
+                          width: isMobile ? "100%" : undefined,
+                          boxSizing: "border-box",
+                          touchAction: "manipulation",
+                          WebkitTapHighlightColor: "transparent",
                         }}
                       >
-                        Сохранить анализ
+                        {analysisSaveStatus === "saved" && !analysisSaveFeedback?.ok
+                          ? "Сохранено"
+                          : "Сохранить анализ"}
                       </button>
+                      {analysisSaveFeedback && !analysisSaveFeedback.ok ? (
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            lineHeight: 1.45,
+                            color: isDark ? "rgba(255,180,160,0.95)" : "#b42318",
+                            textAlign: isMobile ? "left" : undefined,
+                          }}
+                        >
+                          {analysisSaveFeedback.message}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                   {process.env.NODE_ENV === "development" && semanticDraft ? (
