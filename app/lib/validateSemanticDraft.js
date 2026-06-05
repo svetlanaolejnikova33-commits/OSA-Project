@@ -82,6 +82,10 @@ function asString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 export function normalizeAnalysisMode(value) {
   const mode = asString(value).toLowerCase();
   return ANALYSIS_MODES.includes(mode) ? mode : "pro";

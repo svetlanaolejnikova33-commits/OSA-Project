@@ -16,6 +16,7 @@ import { getSceneGraphSummary } from "../../lib/sceneGraphUtils";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { ProjectProgress } from "./ProjectProgress";
 import { ResponsiveSection } from "../ResponsiveSection";
+import { SupplierMatchesSection } from "../SupplierMatchesSection";
 
 function sectionTitleStyle(isDark) {
   return {
@@ -258,23 +259,18 @@ export function ProjectSidebar({
         <div style={{ fontSize: "13px", lineHeight: 1.5 }}>ready: {generationBridgeSummary.ready}</div>
       </div>
 
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Supplier Intelligence</div>
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "16px",
-          marginBottom: "16px",
-          border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-          background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
-        }}
-      >
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "6px" }}>
-          Категории: {supplierIntelligence.categoryCount}
+      <div style={{ marginTop: "16px", marginBottom: "16px" }}>
+        <SupplierMatchesSection
+          budgetDraft={budgetDraft}
+          isDark={isDark}
+          isMobile={isMobile}
+          title="Найденные поставщики"
+          showReadiness
+          supplierIntelligence={supplierIntelligence}
+        />
+        <div style={{ marginTop: "12px" }}>
+          <ProjectProgress steps={supplierIntelligence.readiness} isDark={isDark} />
         </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "10px" }}>
-          Matched brands: {supplierIntelligence.matchedBrandCount}
-        </div>
-        <ProjectProgress steps={supplierIntelligence.readiness} isDark={isDark} />
       </div>
 
       <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Прогресс проекта</div>

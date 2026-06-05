@@ -10,6 +10,7 @@ import {
 import { formatEditTypesRu } from "../lib/editableObjectsUtils";
 import { getConceptDNA } from "../lib/styleConsistencyUtils";
 import { getSafeAnalysisTheme, isLightSwatchColor } from "../lib/getSafeAnalysisTheme";
+import { SupplierMatchesSection } from "./SupplierMatchesSection";
 import {
   ANALYSIS_MODE_LABELS_RU,
   getAnalysisModeEmptyMessage,
@@ -931,35 +932,56 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function budgetDraftButtonStyle(theme) {
+  return {
+    padding: "10px 14px",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 600,
+    cursor: "pointer",
+    border: `1px solid ${theme.border}`,
+    background: theme.cardBackground,
+    color: theme.textPrimary,
+    font: "inherit",
+  };
+}
+
+function BudgetDraftActionButton({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false }) {
+  if (budgetDraft) {
+    return (
+      <div style={{ ...text, fontWeight: 600 }}>
+        Черновик сметы создан
+        {Array.isArray(budgetDraft.normalizedSpecGroups) && budgetDraft.normalizedSpecGroups.length
+          ? ` · ${budgetDraft.normalizedSpecGroups.length} категорий`
+          : ""}
+      </div>
+    );
+  }
+  return (
+    <button type="button" onClick={onCreateBudgetDraft} style={budgetDraftButtonStyle(theme)}>
+      Создать черновик сметы
+    </button>
+  );
+}
+
 function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false }) {
   const groups = sortSpecificationGroups(budgetDraft?.groups || []);
   const normalizedGroups = Array.isArray(budgetDraft?.normalizedSpecGroups)
     ? budgetDraft.normalizedSpecGroups
     : [];
+  if (!budgetDraft) {
+    return (
+      <Section label="Черновик сметы" theme={theme} isMobile={isMobile} sectionKey="budget">
+        <div style={{ ...text, color: theme.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
+          Создайте черновик сметы кнопкой в блоке «Анализ сцены».
+        </div>
+      </Section>
+    );
+  }
   return (
     <Section label="Черновик сметы" theme={theme} isMobile={isMobile} sectionKey="budget">
-      {!budgetDraft ? (
-        <button
-          type="button"
-          onClick={onCreateBudgetDraft}
-          style={{
-            padding: "10px 14px",
-            borderRadius: "999px",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-            border: `1px solid ${theme.border}`,
-            background: theme.cardBackground,
-            color: theme.textPrimary,
-            font: "inherit",
-          }}
-        >
-          Создать черновик сметы
-        </button>
-      ) : (
-        <>
-          <div style={{ ...text, fontWeight: 600 }}>Черновик сметы создан</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "12px" }}>
+      <>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {groups.length ? (
               groups.map((group) => (
                 <div key={group.group || group.group} style={text}>
@@ -1012,8 +1034,7 @@ function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isM
             {budgetDraft.note ||
               "Цены, артикулы и количества появятся после подключения каталогов и BIM-данных."}
           </div>
-        </>
-      )}
+      </>
     </Section>
   );
 }
@@ -1149,6 +1170,16 @@ export function VisionAnalysisPanel({
             Профессиональная интерьерная карта
           </div>
         </Section>
+        {budgetDraft ? (
+          <Section label="Найденные поставщики" theme={theme} isMobile={isMobile} sectionKey="supplier-matches-pro">
+            <SupplierMatchesSection
+              budgetDraft={budgetDraft}
+              isDark={isDark}
+              isMobile={isMobile}
+              title=""
+            />
+          </Section>
+        ) : null}
         {pro.spaceType?.labelRu || pro.spaceType?.value ? (
           <Section label="Назначение помещения" theme={theme} isMobile={isMobile} sectionKey="space">
             <div style={{ ...text, fontSize: "15px", fontWeight: 600 }}>
@@ -1372,6 +1403,15 @@ export function VisionAnalysisPanel({
         <div style={{ ...text, marginTop: "8px", color: theme.textSecondary, fontSize: "12px", lineHeight: 1.5, textTransform: "none" }}>
           Черновая спецификация по изображению. Точные артикулы, размеры и цены появятся после подключения каталогов и BIM-данных.
         </div>
+      </Section>
+      <Section label="Смета" theme={theme} isMobile={isMobile} sectionKey="budget-action">
+        <BudgetDraftActionButton
+          budgetDraft={budgetDraft}
+          onCreateBudgetDraft={onCreateBudgetDraft}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+        />
       </Section>
       {Array.isArray(spec.functionalZones) && spec.functionalZones.length ? (
         <Section label="Функциональные зоны" theme={theme} isMobile={isMobile} sectionKey="zones">

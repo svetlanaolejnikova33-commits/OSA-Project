@@ -37,9 +37,6 @@ const EXPLICIT_SYNONYMS = {
   "floor_finish.microcement": ["микроцемент", "microcement"],
   "floor_finish.concrete": ["бетонный пол", "concrete floor", "concrete"],
   "floor_finish.carpet": ["ковролин", "wall to wall carpet"],
-  "wall_finish.paint": ["краска", "paint"],
-  "wall_finish.wallpaper": ["обои", "wallpaper"],
-  "wall_finish.decorative_plaster": ["декоративная штукатурка", "decorative plaster"],
   "wall_finish.wall_panels": ["стеновая панель", "стеновые панели", "wall panel"],
   "wall_finish.brick": ["кирпич", "brick"],
   "wall_finish.stone": ["камень", "stone wall", "stone"],
@@ -71,7 +68,25 @@ const EXPLICIT_SYNONYMS = {
   "appliance.dishwashers": ["посудомоечная машина", "dishwasher"],
   "appliance.washing_machines": ["стиральная машина", "washing machine"],
   floor_finish: ["отделка пола", "пол", "floor finish", "flooring"],
-  wall_finish: ["отделка стен", "стены", "wall finish"],
+  wall_finish: [
+    "отделка стен",
+    "стены",
+    "стена",
+    "стен",
+    "wall finish",
+    "настенное покрытие",
+    "покрытие стен",
+  ],
+  "wall_finish.paint": [
+    "краска для стен",
+    "краска стен",
+    "настенная краска",
+    "покраска стен",
+    "краска",
+    "paint",
+  ],
+  "wall_finish.wallpaper": ["обои", "wallpaper", "настенные обои"],
+  "wall_finish.decorative_plaster": ["декоративная штукатурка", "штукатурка стен"],
   ceiling: ["потолок", "потолочные системы", "ceiling"],
   furniture: ["мебель", "furniture"],
   lighting: ["освещение", "свет", "lighting", "light fixture"],
@@ -130,10 +145,30 @@ function buildAliasIndex() {
 
 const ALIAS_INDEX = buildAliasIndex();
 
+const GENERIC_ALIAS_TOKENS = new Set(["wall", "finish", "floor", "стен", "пол"]);
+
+function hasWallFinishContext(text) {
+  return /(?:^|\s)(?:стен|стены|стена|wall finish|отделка стен|обои|настенн|краска для стен|покрытие стен|настенное покрытие)/.test(
+    text
+  );
+}
+
+function hasFloorFinishContext(text) {
+  return /(?:^|\s)(?:пол|пола|полы|floor finish|отделка пола|flooring|ковролин|паркет|ламинат)/.test(text);
+}
+
+function isExcludedCategoryForContext(categoryId, text) {
+  const id = typeof categoryId === "string" ? categoryId : "";
+  if (hasWallFinishContext(text) && id.startsWith("floor_finish")) return true;
+  if (hasFloorFinishContext(text) && id.startsWith("wall_finish")) return true;
+  return false;
+}
+
 function scoreAliasMatch(text, alias) {
   if (!text || !alias) return 0;
   if (text === alias) return 1;
   if (text.includes(alias) || alias.includes(text)) {
+    if (GENERIC_ALIAS_TOKENS.has(alias)) return 0.45;
     return alias.length >= 4 ? 0.9 : 0.75;
   }
   const textTokens = tokenize(text);
@@ -150,6 +185,7 @@ function matchRegistryCategory(sourceText, contextText = "") {
 
   let best = null;
   for (const entry of ALIAS_INDEX) {
+    if (isExcludedCategoryForContext(entry.id, haystack)) continue;
     for (const alias of entry.aliases) {
       const score = scoreAliasMatch(haystack, alias);
       if (!score) continue;

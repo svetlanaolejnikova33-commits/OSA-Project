@@ -60,6 +60,8 @@ import {
   clearWorkspaceSessionEnvelope,
 } from "./lib/workspaceSessionPersistence";
 
+const USER_VISIBLE_ANALYSIS_MODES = ANALYSIS_MODES.filter((mode) => mode !== "spec");
+
 /** Atmosphere modes (image API + badges). English labels as design system. */
 const ATMOSPHERE_KEYS = [
   "architectural_white",
@@ -1409,6 +1411,7 @@ export default function Home() {
   const [documentStoreVersion, setDocumentStoreVersion] = useState(0);
   const [analysisSaveFeedback, setAnalysisSaveFeedback] = useState(null);
   const [budgetDraftsVersion, setBudgetDraftsVersion] = useState(0);
+  const [registrySupplierSources, setRegistrySupplierSources] = useState(null);
   const [devAnalysisScenarioType, setDevAnalysisScenarioType] = useState("");
   const [isAnalyzeDropActive, setIsAnalyzeDropActive] = useState(false);
   const [activeProjectKey, setActiveProjectKey] = useState(null);
@@ -1613,6 +1616,7 @@ export default function Home() {
   }, []);
 
   const isDark = theme === "dark";
+  const panelAnalysisMode = selectedAnalysisMode === "spec" ? "pro" : selectedAnalysisMode;
   const isGenerateMode = mode === "generate";
   const isAnalyzeMode = mode === "analyze";
   const isGenerateLoading = isRunning && isGenerateMode;
@@ -2220,6 +2224,7 @@ export default function Home() {
     });
     const { normalizedSpecGroups: enrichedSpecGroups } = matchSpecGroupsToSuppliers({
       normalizedSpecGroups,
+      ...(registrySupplierSources?.length ? { supplierSources: registrySupplierSources } : {}),
     });
     const normalizedWithSceneObjects = attachRelatedSceneObjectsToSpecGroups(
       enrichedSpecGroups,
@@ -2283,6 +2288,29 @@ export default function Home() {
       cancelled = true;
     };
   }, [activeProjectKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/registry/sync");
+        const data = await res.json();
+        if (
+          !cancelled &&
+          data?.ok &&
+          Array.isArray(data.supplierSources) &&
+          data.supplierSources.length > 0
+        ) {
+          setRegistrySupplierSources(data.supplierSources);
+        }
+      } catch (e) {
+        console.warn("[OSA] registry preload failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -5350,7 +5378,7 @@ export default function Home() {
           <button
             type="button"
             style={{ ...heroCtaPrimaryStyle, boxShadow: heroCtaPrimaryShadowDefault }}
-            onClick={handleStartNewProject}
+            onClick={() => setTheme(isDark ? "light" : "dark")}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = "translateY(-3px) scale(1.04)";
               e.currentTarget.style.boxShadow = heroCtaPrimaryShadowHover;
@@ -5362,23 +5390,7 @@ export default function Home() {
               e.currentTarget.style.filter = "";
             }}
           >
-            Начать проект
-          </button>
-
-          <button
-            type="button"
-            style={heroCtaSecondaryStyle}
-            onClick={() => setTheme(isDark ? "light" : "dark")}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-2px)";
-              e.currentTarget.style.opacity = "1";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0px)";
-              e.currentTarget.style.opacity = "0.88";
-            }}
-          >
-            Тема: {isDark ? "светлая" : "тёмная"}
+            {isDark ? "Светлая" : "Тёмная"}
           </button>
         </div>
         </div>
@@ -6790,8 +6802,8 @@ export default function Home() {
                   marginBottom: "4px",
                 }}
               >
-                {ANALYSIS_MODES.map((mode) => {
-                  const active = selectedAnalysisMode === mode;
+                {USER_VISIBLE_ANALYSIS_MODES.map((mode) => {
+                  const active = panelAnalysisMode === mode;
                   return (
                     <button
                       key={mode}
@@ -6833,7 +6845,7 @@ export default function Home() {
                 }}
               >
                 {hasSemanticAnalysis(semanticDraft)
-                  ? `Просмотр: ${ANALYSIS_MODE_LABELS_RU[selectedAnalysisMode] || selectedAnalysisMode}`
+                  ? `Просмотр: ${ANALYSIS_MODE_LABELS_RU[panelAnalysisMode] || panelAnalysisMode}`
                   : "Загрузите изображение и нажмите «Анализировать интерьер»"}
               </div>
 
@@ -6933,14 +6945,81 @@ export default function Home() {
                       ) : null}
                     </div>
                   ) : null}
+                  {semanticDraft ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                        marginTop: "12px",
+                        alignItems: isMobile ? "stretch" : "flex-start",
+                      }}
+                    >
+                      {activeBudgetDraft ? (
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            lineHeight: 1.45,
+                            color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)",
+                          }}
+                        >
+                          Черновик сметы создан
+                          {Array.isArray(activeBudgetDraft.normalizedSpecGroups) &&
+                          activeBudgetDraft.normalizedSpecGroups.length
+                            ? ` · ${activeBudgetDraft.normalizedSpecGroups.length} категорий`
+                            : ""}
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCreateBudgetDraft();
+                            }}
+                            disabled={isRunning}
+                            style={{
+                              ...actionButtonStyle,
+                              alignSelf: isMobile ? "stretch" : undefined,
+                              width: isMobile ? "100%" : undefined,
+                              opacity: isRunning ? 0.6 : 1,
+                              cursor: isRunning ? "default" : "pointer",
+                            }}
+                          >
+                            Создать черновик сметы
+                          </button>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              lineHeight: 1.45,
+                              color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.88)",
+                            }}
+                          >
+                            Подготовка категорий для сметы и подбора поставщиков из реестра.
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
                   {process.env.NODE_ENV === "development" && semanticDraft ? (
-                    <AnalysisQualityCheckPanel
-                      semanticDraft={semanticDraft}
-                      budgetDraft={activeBudgetDraft}
-                      scenarioType={devAnalysisScenarioType}
-                      onScenarioTypeChange={setDevAnalysisScenarioType}
-                      isDark={isDark}
-                    />
+                    <details
+                      style={{
+                        marginTop: "10px",
+                        fontSize: "12px",
+                        color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+                      }}
+                    >
+                      <summary style={{ cursor: "pointer", userSelect: "none" }}>Quality Check (dev)</summary>
+                      <AnalysisQualityCheckPanel
+                        semanticDraft={semanticDraft}
+                        budgetDraft={activeBudgetDraft}
+                        scenarioType={devAnalysisScenarioType}
+                        onScenarioTypeChange={setDevAnalysisScenarioType}
+                        isDark={isDark}
+                        compact
+                      />
+                    </details>
                   ) : null}
                 </div>
 
@@ -6948,7 +7027,7 @@ export default function Home() {
                   {semanticDraft ? (
                     <VisionAnalysisPanel
                       semanticDraft={semanticDraft}
-                      activeMode={selectedAnalysisMode}
+                      activeMode={panelAnalysisMode}
                       isDark={isDark}
                       isMobile={isMobile}
                       revealStyle={generateRevealStyle(isAnalyzeResultVisible)}

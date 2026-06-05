@@ -12,6 +12,7 @@ export function AnalysisQualityCheckPanel({
   scenarioType,
   onScenarioTypeChange,
   isDark,
+  compact = false,
 }) {
   if (process.env.NODE_ENV !== "development" || !semanticDraft) return null;
 
@@ -21,16 +22,18 @@ export function AnalysisQualityCheckPanel({
   return (
     <div
       style={{
-        marginTop: "14px",
-        padding: "12px",
-        borderRadius: "14px",
-        border: isDark ? "1px dashed rgba(255,255,255,0.14)" : "1px dashed rgba(0,0,0,0.12)",
-        background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.55)",
+        marginTop: compact ? "8px" : "14px",
+        padding: compact ? "8px 0 0" : "12px",
+        borderRadius: compact ? "0" : "14px",
+        border: compact ? "none" : isDark ? "1px dashed rgba(255,255,255,0.14)" : "1px dashed rgba(0,0,0,0.12)",
+        background: compact ? "transparent" : isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.55)",
       }}
     >
-      <div style={{ fontSize: "12px", letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.7 }}>
-        Quality Check
-      </div>
+      {!compact ? (
+        <div style={{ fontSize: "12px", letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.7 }}>
+          Quality Check
+        </div>
+      ) : null}
       <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
         <label style={{ fontSize: "12px", display: "flex", gap: "6px", alignItems: "center" }}>
           <span>Сценарий</span>
