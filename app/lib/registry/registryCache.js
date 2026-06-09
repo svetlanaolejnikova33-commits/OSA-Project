@@ -70,3 +70,23 @@ export function getRegistrySupplierSources() {
 export function hasRegistryCache() {
   return cache.supplierSources.length > 0;
 }
+
+function normalizeBrandKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+export function findManufacturerByBrandName(brandName) {
+  const needle = normalizeBrandKey(brandName);
+  if (!needle) return null;
+
+  return (
+    cache.manufacturers.find((entry) => {
+      const hay = normalizeBrandKey(entry?.brandName);
+      if (!hay) return false;
+      return hay === needle || hay.includes(needle) || needle.includes(hay);
+    }) || null
+  );
+}

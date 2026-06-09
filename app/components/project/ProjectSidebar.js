@@ -16,6 +16,7 @@ import { getSceneGraphSummary } from "../../lib/sceneGraphUtils";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { ProjectProgress } from "./ProjectProgress";
 import { ResponsiveSection } from "../ResponsiveSection";
+import { SkuMatchesSection } from "../SkuMatchesSection";
 import { SupplierMatchesSection } from "../SupplierMatchesSection";
 
 function sectionTitleStyle(isDark) {
@@ -123,6 +124,24 @@ export function ProjectSidebar({
         >
           {isRunning ? "Анализ выполняется…" : snapshot.status}
         </div>
+      </div>
+
+      <div style={{ marginBottom: "16px" }}>
+        <SupplierMatchesSection
+          budgetDraft={budgetDraft}
+          isDark={isDark}
+          isMobile={isMobile}
+          title="Найденные поставщики"
+          showReadiness
+          supplierIntelligence={supplierIntelligence}
+          displayMode="list"
+        />
+        {budgetDraft ? (
+          <div style={{ marginTop: "12px" }}>
+            <ProjectProgress steps={supplierIntelligence.readiness} isDark={isDark} />
+          </div>
+        ) : null}
+        <SkuMatchesSection budgetDraft={budgetDraft} isDark={isDark} />
       </div>
 
       <ResponsiveSection
@@ -257,20 +276,6 @@ export function ProjectSidebar({
           requires mask: {generationBridgeSummary.requiresMask}
         </div>
         <div style={{ fontSize: "13px", lineHeight: 1.5 }}>ready: {generationBridgeSummary.ready}</div>
-      </div>
-
-      <div style={{ marginTop: "16px", marginBottom: "16px" }}>
-        <SupplierMatchesSection
-          budgetDraft={budgetDraft}
-          isDark={isDark}
-          isMobile={isMobile}
-          title="Найденные поставщики"
-          showReadiness
-          supplierIntelligence={supplierIntelligence}
-        />
-        <div style={{ marginTop: "12px" }}>
-          <ProjectProgress steps={supplierIntelligence.readiness} isDark={isDark} />
-        </div>
       </div>
 
       <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Прогресс проекта</div>

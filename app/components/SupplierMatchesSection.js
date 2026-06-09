@@ -7,8 +7,15 @@ function asArray(value) {
 function categoryTitle(entry) {
   const parent = typeof entry?.parentLabelRu === "string" ? entry.parentLabelRu.trim() : "";
   const label = typeof entry?.labelRu === "string" ? entry.labelRu.trim() : "";
-  if (parent && label) return `${parent} / ${label}`;
-  return label || parent || "Категория";
+  if (parent) return parent;
+  return label || "Категория";
+}
+
+function categorySubtitle(entry) {
+  const parent = typeof entry?.parentLabelRu === "string" ? entry.parentLabelRu.trim() : "";
+  const label = typeof entry?.labelRu === "string" ? entry.labelRu.trim() : "";
+  if (parent && label && parent !== label) return label;
+  return "";
 }
 
 function cardStyle(isDark) {
@@ -32,6 +39,15 @@ function chipStyle(isDark) {
   };
 }
 
+function sortGroups(groups) {
+  return [...groups].sort((left, right) => {
+    const leftCount = asArray(left?.supplierCandidates?.matchedBrands).length;
+    const rightCount = asArray(right?.supplierCandidates?.matchedBrands).length;
+    if (leftCount !== rightCount) return rightCount - leftCount;
+    return categoryTitle(left).localeCompare(categoryTitle(right), "ru");
+  });
+}
+
 export function SupplierMatchesSection({
   budgetDraft,
   isDark,
@@ -39,8 +55,17 @@ export function SupplierMatchesSection({
   title = "Найденные поставщики",
   showReadiness = false,
   supplierIntelligence = null,
+  displayMode = "chips",
+  onlyWithBrands = false,
 }) {
-  const groups = asArray(budgetDraft?.normalizedSpecGroups);
+  const groups = sortGroups(
+    onlyWithBrands
+      ? asArray(budgetDraft?.normalizedSpecGroups).filter(
+          (entry) => asArray(entry?.supplierCandidates?.matchedBrands).length > 0
+        )
+      : asArray(budgetDraft?.normalizedSpecGroups)
+  );
+
   if (!budgetDraft) {
     return (
       <div style={cardStyle(isDark)}>
@@ -55,7 +80,9 @@ export function SupplierMatchesSection({
     return (
       <div style={cardStyle(isDark)}>
         <div style={{ fontSize: "13px", lineHeight: 1.5, color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)" }}>
-          Категории сметы пока не сформированы.
+          {onlyWithBrands
+            ? "Поставщики из реестра пока не найдены. Проверьте группы освещения в анализе."
+            : "Категории сметы пока не сформированы."}
         </div>
       </div>
     );
@@ -93,14 +120,31 @@ export function SupplierMatchesSection({
         {groups.map((entry) => {
           const matchedBrands = asArray(entry?.supplierCandidates?.matchedBrands);
           const categoryName = categoryTitle(entry);
+          const categoryHint = categorySubtitle(entry);
+          const brandLabel =
+            matchedBrands.length === 1
+              ? "1 бренд найден"
+              : `${matchedBrands.length} брендов найдено`;
           return (
             <div
               key={`${entry.registryCategoryId}-${entry.sourceText || categoryName}`}
               style={cardStyle(isDark)}
             >
-              <div style={{ fontSize: "14px", fontWeight: 600, lineHeight: 1.4, marginBottom: "6px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 600, lineHeight: 1.4, marginBottom: "4px" }}>
                 {categoryName}
               </div>
+              {categoryHint ? (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    lineHeight: 1.45,
+                    marginBottom: "6px",
+                    color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.78)",
+                  }}
+                >
+                  {categoryHint}
+                </div>
+              ) : null}
               <div
                 style={{
                   fontSize: "12px",
@@ -109,27 +153,35 @@ export function SupplierMatchesSection({
                   color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.82)",
                 }}
               >
-                Брендов: {matchedBrands.length}
+                {matchedBrands.length ? brandLabel : "Поставщики пока не найдены для этой категории"}
               </div>
               {matchedBrands.length ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                  {matchedBrands.map((brand) => (
-                    <span key={`${entry.registryCategoryId}-${brand.brandId || brand.brandName}`} style={chipStyle(isDark)}>
-                      {brand.brandName}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div
-                  style={{
-                    fontSize: "12px",
-                    lineHeight: 1.45,
-                    color: isDark ? "rgba(243,238,231,0.58)" : "rgba(110,106,102,0.78)",
-                  }}
-                >
-                  Поставщики пока не найдены для этой категории
-                </div>
-              )}
+                displayMode === "list" ? (
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "18px",
+                      fontSize: "13px",
+                      lineHeight: 1.55,
+                      color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)",
+                    }}
+                  >
+                    {matchedBrands.map((brand) => (
+                      <li key={`${entry.registryCategoryId}-${brand.brandId || brand.brandName}`}>
+                        {brand.brandName}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    {matchedBrands.map((brand) => (
+                      <span key={`${entry.registryCategoryId}-${brand.brandId || brand.brandName}`} style={chipStyle(isDark)}>
+                        {brand.brandName}
+                      </span>
+                    ))}
+                  </div>
+                )
+              ) : null}
             </div>
           );
         })}

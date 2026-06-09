@@ -42,6 +42,9 @@ import {
 } from "./lib/analysisDocumentsStore";
 import { mapSpecToSupplierRegistry } from "./lib/mapSpecToSupplierRegistry";
 import { matchSpecGroupsToSuppliers } from "./lib/matchSpecGroupsToSuppliers";
+import { buildPreviewBudgetRowsFromSkuMatches } from "./lib/registry/buildPreviewBudgetRows";
+import { enrichSkuMatchesWithProductMedia } from "./lib/registry/enrichSkuMatchesWithProductMedia";
+import { fetchSkuMatchesForBudgetDraft } from "./lib/registry/fetchSkuMatchesForBudgetDraft";
 import { attachBudgetContextToMutations } from "./lib/designMutationUtils";
 import {
   applyGenerationPackageReadiness,
@@ -2204,15 +2207,8 @@ export default function Home() {
     }
   };
 
-  const handleCreateBudgetDraft = () => {
-    if (!activeProjectKey || !semanticDraft?.specAnalysis) return;
-    const linkageId =
-      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
-    if (!linkageId) return;
-    if (getBudgetDraftForAnalysisRecord(linkageId)) {
-      setBudgetDraftsVersion((value) => value + 1);
-      return;
-    }
+  function buildBudgetDraftPayload(existingDraft, linkageId) {
+    if (!activeProjectKey || !semanticDraft?.specAnalysis || !linkageId) return null;
     const groups = Array.isArray(semanticDraft.specAnalysis.specificationGroups)
       ? semanticDraft.specAnalysis.specificationGroups
       : [];
@@ -2238,11 +2234,11 @@ export default function Home() {
       semanticDraft.designMutations || [],
       { normalizedSpecGroups: normalizedWithEditableObjects }
     );
-    upsertBudgetDraft({
-      id: newStableId(),
+    return {
+      id: existingDraft?.id || newStableId(),
       projectKey: activeProjectKey,
       analysisRecordId: linkageId,
-      createdAt: new Date().toISOString(),
+      createdAt: existingDraft?.createdAt || new Date().toISOString(),
       status: "draft",
       source: "specAnalysis",
       groups,
@@ -2251,8 +2247,29 @@ export default function Home() {
       editableObjectsSnapshot: semanticDraft.editableObjects || [],
       styleConsistencySnapshot: semanticDraft.styleConsistency || null,
       designMutationsSnapshot,
-      note: "Черновая структура сметы без цен и SKU",
+      skuMatches: Array.isArray(existingDraft?.skuMatches) ? existingDraft.skuMatches : [],
+      previewBudgetRows: Array.isArray(existingDraft?.previewBudgetRows)
+        ? existingDraft.previewBudgetRows
+        : [],
+      note: "Черновая структура сметы; SKU on-demand из внешнего прайса",
+    };
+  }
+
+  const handleCreateBudgetDraft = async () => {
+    if (!activeProjectKey || !semanticDraft?.specAnalysis) return;
+    const linkageId =
+      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
+    if (!linkageId) return;
+    const existing = getBudgetDraftForAnalysisRecord(linkageId);
+    const payload = buildBudgetDraftPayload(existing, linkageId);
+    if (!payload) return;
+    const skuMatches = await fetchSkuMatchesForBudgetDraft(payload);
+    const enrichedSkuMatches = await enrichSkuMatchesWithProductMedia(skuMatches);
+    payload.skuMatches = enrichedSkuMatches;
+    payload.previewBudgetRows = buildPreviewBudgetRowsFromSkuMatches(enrichedSkuMatches, {
+      budgetDraft: payload,
     });
+    upsertBudgetDraft(payload);
     setBudgetDraftsVersion((value) => value + 1);
   };
 
@@ -2311,6 +2328,19 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!registrySupplierSources?.length || !activeProjectKey || !semanticDraft?.specAnalysis) return;
+    const linkageId =
+      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
+    if (!linkageId) return;
+    const existing = getBudgetDraftForAnalysisRecord(linkageId);
+    if (!existing) return;
+    const payload = buildBudgetDraftPayload(existing, linkageId);
+    if (!payload) return;
+    upsertBudgetDraft(payload);
+    setBudgetDraftsVersion((value) => value + 1);
+  }, [registrySupplierSources]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -6969,6 +6999,17 @@ export default function Home() {
                           activeBudgetDraft.normalizedSpecGroups.length
                             ? ` · ${activeBudgetDraft.normalizedSpecGroups.length} категорий`
                             : ""}
+                          {(() => {
+                            const brandNames = new Set();
+                            for (const group of activeBudgetDraft.normalizedSpecGroups || []) {
+                              for (const brand of group?.supplierCandidates?.matchedBrands || []) {
+                                const name =
+                                  typeof brand?.brandName === "string" ? brand.brandName.trim() : "";
+                                if (name) brandNames.add(name);
+                              }
+                            }
+                            return brandNames.size ? ` · ${brandNames.size} брендов` : "";
+                          })()}
                         </div>
                       ) : (
                         <>
