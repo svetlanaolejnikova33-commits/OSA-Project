@@ -11,6 +11,7 @@ import { formatEditTypesRu } from "../lib/editableObjectsUtils";
 import { getConceptDNA } from "../lib/styleConsistencyUtils";
 import { getSafeAnalysisTheme, isLightSwatchColor } from "../lib/getSafeAnalysisTheme";
 import { SupplierMatchesSection } from "./SupplierMatchesSection";
+import { VisualProductDiscoverySection } from "./VisualProductDiscoverySection";
 import {
   ANALYSIS_MODE_LABELS_RU,
   getAnalysisModeEmptyMessage,
@@ -964,6 +965,50 @@ function BudgetDraftActionButton({ budgetDraft, onCreateBudgetDraft, theme, text
   );
 }
 
+function VisualProductDiscoveryBlock({
+  showVisualProductDiscovery,
+  visualProductCandidates,
+  visualProductCandidatesLoading,
+  visualProductCandidatesError,
+  theme,
+  text,
+  isMobile,
+  isDark,
+}) {
+  if (!showVisualProductDiscovery) return null;
+
+  return (
+    <Section
+      label="ВИЗУАЛЬНО ПОХОЖИЕ ТОВАРЫ"
+      theme={theme}
+      isMobile={isMobile}
+      sectionKey="visual-product-discovery"
+    >
+      <div
+        style={{
+          ...text,
+          marginBottom: "10px",
+          color: theme.textSecondary,
+          fontSize: "12px",
+          lineHeight: 1.5,
+        }}
+      >
+        Подбор по категории «Подвесные светильники» из каталога МОДЕЛЮКС. Без SKU и цен — только
+        визуальный выбор перед сметой.
+      </div>
+      <VisualProductDiscoverySection
+        candidates={visualProductCandidates}
+        isLoading={visualProductCandidatesLoading}
+        error={visualProductCandidatesError}
+        theme={theme}
+        text={text}
+        isMobile={isMobile}
+        isDark={isDark}
+      />
+    </Section>
+  );
+}
+
 function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false }) {
   const groups = sortSpecificationGroups(budgetDraft?.groups || []);
   const normalizedGroups = Array.isArray(budgetDraft?.normalizedSpecGroups)
@@ -1065,6 +1110,10 @@ export function VisionAnalysisPanel({
   controlledRegenerationError,
   controlledRegenerationResult,
   onAnalyzeControlledVisual,
+  showVisualProductDiscovery = false,
+  visualProductCandidates = [],
+  visualProductCandidatesLoading = false,
+  visualProductCandidatesError = "",
 }) {
   if (!semanticDraft) return null;
 
@@ -1374,6 +1423,16 @@ export function VisionAnalysisPanel({
         <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
         <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
         <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
+        <VisualProductDiscoveryBlock
+          showVisualProductDiscovery={showVisualProductDiscovery}
+          visualProductCandidates={visualProductCandidates}
+          visualProductCandidatesLoading={visualProductCandidatesLoading}
+          visualProductCandidatesError={visualProductCandidatesError}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          isDark={isDark}
+        />
         <DesignMutationsSection
           designMutations={semanticDraft.designMutations}
           generationPackages={semanticDraft.generationPackages}
@@ -1530,6 +1589,16 @@ export function VisionAnalysisPanel({
         controlledRegenerationResult={controlledRegenerationResult}
         onAnalyzeControlledVisual={onAnalyzeControlledVisual}
         isMobile={isMobile}
+      />
+      <VisualProductDiscoveryBlock
+        showVisualProductDiscovery={showVisualProductDiscovery}
+        visualProductCandidates={visualProductCandidates}
+        visualProductCandidatesLoading={visualProductCandidatesLoading}
+        visualProductCandidatesError={visualProductCandidatesError}
+        theme={theme}
+        text={text}
+        isMobile={isMobile}
+        isDark={isDark}
       />
       <BudgetDraftSection
         budgetDraft={budgetDraft}

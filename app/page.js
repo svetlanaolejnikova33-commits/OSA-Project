@@ -45,6 +45,17 @@ import { matchSpecGroupsToSuppliers } from "./lib/matchSpecGroupsToSuppliers";
 import { buildPreviewBudgetRowsFromSkuMatches } from "./lib/registry/buildPreviewBudgetRows";
 import { enrichSkuMatchesWithProductMedia } from "./lib/registry/enrichSkuMatchesWithProductMedia";
 import { fetchSkuMatchesForBudgetDraft } from "./lib/registry/fetchSkuMatchesForBudgetDraft";
+import {
+  fetchVisualProductCandidates,
+  hasLightingPendantsCategory,
+} from "./lib/registry/fetchVisualProductCandidates";
+import { rankVisualCandidates } from "./lib/visualProduct/rankVisualCandidates";
+import {
+  createDemoLightingPendantsSemanticDraft,
+  DEMO_FALLBACK_WARNING_RU,
+  isDemoFallbackEnabled,
+  isOpenAiGeoBlockError,
+} from "./lib/visualProduct/demoSemanticDraftFallback";
 import { attachBudgetContextToMutations } from "./lib/designMutationUtils";
 import {
   applyGenerationPackageReadiness,
@@ -1434,6 +1445,10 @@ export default function Home() {
   const [isControlledRegenerating, setIsControlledRegenerating] = useState(false);
   const [controlledRegenerationError, setControlledRegenerationError] = useState("");
   const [controlledRegenerationResult, setControlledRegenerationResult] = useState(null);
+  const [visualProductCandidates, setVisualProductCandidates] = useState([]);
+  const [visualProductCandidatesLoading, setVisualProductCandidatesLoading] = useState(false);
+  const [visualProductCandidatesError, setVisualProductCandidatesError] = useState("");
+  const [demoFallbackNotice, setDemoFallbackNotice] = useState("");
 
   const [hasRestoredWorkspaceSession, setHasRestoredWorkspaceSession] = useState(false);
   const [createDraftPersistStatus, setCreateDraftPersistStatus] = useState("idle");
@@ -1619,6 +1634,7 @@ export default function Home() {
   }, []);
 
   const isDark = theme === "dark";
+  const demoVisualDiscoveryEnabled = isDemoFallbackEnabled();
   const panelAnalysisMode = selectedAnalysisMode === "spec" ? "pro" : selectedAnalysisMode;
   const isGenerateMode = mode === "generate";
   const isAnalyzeMode = mode === "analyze";
@@ -2341,6 +2357,52 @@ export default function Home() {
     upsertBudgetDraft(payload);
     setBudgetDraftsVersion((value) => value + 1);
   }, [registrySupplierSources]);
+
+  const showVisualProductDiscovery = useMemo(
+    () => hasLightingPendantsCategory(semanticDraft),
+    [semanticDraft],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!semanticDraft || !showVisualProductDiscovery) {
+      setVisualProductCandidates([]);
+      setVisualProductCandidatesLoading(false);
+      setVisualProductCandidatesError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setVisualProductCandidatesLoading(true);
+    setVisualProductCandidatesError("");
+
+    (async () => {
+      try {
+        const rawCandidates = await fetchVisualProductCandidates();
+        const candidates = rankVisualCandidates(semanticDraft, rawCandidates);
+        if (!cancelled) {
+          setVisualProductCandidates(candidates);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setVisualProductCandidates([]);
+          setVisualProductCandidatesError(
+            error instanceof Error ? error.message : "Modelux catalog fetch failed.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setVisualProductCandidatesLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [semanticDraft, showVisualProductDiscovery]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -4865,6 +4927,7 @@ export default function Home() {
     setActiveSavedAnalysisRecordId("");
     setSavedDocumentSnapshot("");
     setAnalyzeSceneError("");
+    setDemoFallbackNotice("");
     setIsAnalyzeResultVisible(false);
     setSelectedImageBase64("");
     setSelectedImageId("");
@@ -4889,6 +4952,35 @@ export default function Home() {
     setSelectedImageDimensions(dims);
   }
 
+  const applyDemoSemanticDraftToAnalyzeState = (extractedPalette = null) => {
+    const nextDraft = createDemoLightingPendantsSemanticDraft({
+      extractedPalette,
+      viewMode: selectedAnalysisMode,
+    });
+    setActiveSavedAnalysisRecordId("");
+    setSavedDocumentSnapshot("");
+    setSemanticDraft(nextDraft);
+    setResultAnalysisMode(selectedAnalysisMode);
+    setAnalyzeSceneError("");
+    setDemoFallbackNotice(DEMO_FALLBACK_WARNING_RU);
+    window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+    createDraftDirtyRef.current = true;
+    window.setTimeout(() => persistWorkspaceSessionNowRef.current(), 0);
+    return nextDraft;
+  };
+
+  const handleDemoVisualDiscoveryWithoutVision = () => {
+    if (!isDemoFallbackEnabled()) return;
+    let projectKey = activeProjectKey;
+    if (!projectKey) {
+      projectKey = newStableId();
+      stableSessionProjectKeyRef.current = projectKey;
+      persistActiveProjectKey(projectKey);
+      setActiveProjectKey(projectKey);
+    }
+    applyDemoSemanticDraftToAnalyzeState(null);
+  };
+
   const handleAnalyzeImage = async () => {
     if (isRunning) return;
     if (!selectedImagePreviewUrl || !selectedImageFileName || !selectedImageBase64) return;
@@ -4908,6 +5000,7 @@ export default function Home() {
 
     setIsRunning(true);
     setAnalyzeSceneError("");
+    setDemoFallbackNotice("");
     setIsAnalyzeResultVisible(false);
     setAnalysisSaveFeedback(null);
 
@@ -4941,7 +5034,13 @@ export default function Home() {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(typeof payload?.error === "string" ? payload.error : "Vision analysis failed.");
+        const errorMessage =
+          typeof payload?.error === "string" ? payload.error : "Vision analysis failed.";
+        if (isDemoFallbackEnabled() && isOpenAiGeoBlockError(errorMessage)) {
+          applyDemoSemanticDraftToAnalyzeState(extractedPalette);
+          return;
+        }
+        throw new Error(errorMessage);
       }
 
       const nextDraft = validateSemanticDraft(payload?.semanticDraft, {
@@ -4954,6 +5053,7 @@ export default function Home() {
       setSavedDocumentSnapshot("");
       setSemanticDraft(nextDraft);
       setResultAnalysisMode(selectedAnalysisMode);
+      setDemoFallbackNotice("");
       window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
 
       if (isIndexedDbAvailable()) {
@@ -6895,6 +6995,24 @@ export default function Home() {
               >
                 {isRunning ? "Анализируем…" : "Анализировать интерьер"}
               </button>
+              {demoVisualDiscoveryEnabled ? (
+                <button
+                  type="button"
+                  style={{
+                    ...actionButtonStyle,
+                    marginTop: "8px",
+                    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.72)",
+                    border: isDark
+                      ? "1px solid rgba(255,255,255,0.14)"
+                      : "1px solid rgba(0,0,0,0.08)",
+                    fontSize: "12px",
+                  }}
+                  onClick={handleDemoVisualDiscoveryWithoutVision}
+                  disabled={isRunning}
+                >
+                  Проверить Visual Discovery без Vision
+                </button>
+              ) : null}
               </div>
 
               <div style={{ ...analyzeResultModuleStyle, width: "100%", alignSelf: "stretch" }}>
@@ -6902,11 +7020,31 @@ export default function Home() {
                   <div style={aiResultHeaderTitleStyle}>АНАЛИЗ СЦЕНЫ</div>
                   <div style={aiResultHeaderSubtitleStyle}>
                     {semanticDraft
-                      ? "Семантический разбор сцены готов"
+                      ? semanticDraft?.demoFallback
+                        ? "Demo fallback semanticDraft для Visual Discovery"
+                        : "Семантический разбор сцены готов"
                       : isAnalyzeLoading
                         ? "Анализ интерьерной сцены..."
                         : "Загрузите изображение и нажмите «Анализировать интерьер»"}
                   </div>
+                  {demoFallbackNotice ? (
+                    <div
+                      style={{
+                        marginTop: "10px",
+                        padding: "10px 12px",
+                        borderRadius: "12px",
+                        fontSize: "12px",
+                        lineHeight: 1.5,
+                        color: isDark ? "rgba(255,214,170,0.95)" : "rgba(120,72,20,0.92)",
+                        background: isDark ? "rgba(255,180,90,0.12)" : "rgba(255,236,200,0.92)",
+                        border: isDark
+                          ? "1px solid rgba(255,180,90,0.28)"
+                          : "1px solid rgba(210,150,70,0.28)",
+                      }}
+                    >
+                      {demoFallbackNotice}
+                    </div>
+                  ) : null}
                   {semanticDraft ? (
                     <div
                       style={{
@@ -7082,6 +7220,10 @@ export default function Home() {
                       controlledRegenerationError={controlledRegenerationError}
                       controlledRegenerationResult={controlledRegenerationResult}
                       onAnalyzeControlledVisual={handleAnalyzeControlledVisual}
+                      showVisualProductDiscovery={showVisualProductDiscovery}
+                      visualProductCandidates={visualProductCandidates}
+                      visualProductCandidatesLoading={visualProductCandidatesLoading}
+                      visualProductCandidatesError={visualProductCandidatesError}
                     />
                   ) : (
                     <div style={aiEmptyStateStyle}>

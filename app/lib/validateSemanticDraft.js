@@ -26,16 +26,16 @@ export const SPACE_TYPE_VALUES = [
 ];
 
 export const SPACE_TYPE_LABELS_RU = {
-  kitchen: "РљСѓС…РЅСЏ",
-  living_room: "Р“РѕСЃС‚РёРЅР°СЏ",
-  bedroom: "РЎРїР°Р»СЊРЅСЏ",
-  bathroom: "РЎР°РЅСѓР·РµР»",
-  hallway: "РџСЂРёС…РѕР¶Р°СЏ",
-  dining_room: "РЎС‚РѕР»РѕРІР°СЏ",
-  office: "РљР°Р±РёРЅРµС‚",
-  open_space: "РћС‚РєСЂС‹С‚РѕРµ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ",
-  commercial: "РљРѕРјРјРµСЂС‡РµСЃРєРѕРµ РїРѕРјРµС‰РµРЅРёРµ",
-  unknown: "РќРµ РѕРїСЂРµРґРµР»РµРЅРѕ",
+  kitchen: "Кухня",
+  living_room: "Гостиная",
+  bedroom: "Спальня",
+  bathroom: "Санузел",
+  hallway: "Прихожая",
+  dining_room: "Столовая",
+  office: "Кабинет",
+  open_space: "Открытое пространство",
+  commercial: "Коммерческое помещение",
+  unknown: "Не определено",
 };
 
 export const ANALYSIS_MODES = ["quick", "pro", "spec"];
@@ -76,7 +76,7 @@ const GENERIC_HALLUCINATION_TERMS = [
   "matte black steel",
 ];
 
-const UNCONFIRMED_RU = "РІРёР·СѓР°Р»СЊРЅРѕ РЅРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ";
+const UNCONFIRMED_RU = "визуально не подтверждено";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
