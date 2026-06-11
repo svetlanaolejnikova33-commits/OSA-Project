@@ -8,8 +8,6 @@ import {
   getSidebarPalette,
   getSupplierIntelligence,
 } from "../../lib/projectWorkspaceModel";
-import { getDesignMutationsSummary } from "../../lib/designMutationUtils";
-import { getGenerationBridgeSummary } from "../../lib/generationPackageUtils";
 import { getEditableObjectsSummary } from "../../lib/editableObjectsUtils";
 import { getConceptDNASummary } from "../../lib/styleConsistencyUtils";
 import { getSceneGraphSummary } from "../../lib/sceneGraphUtils";
@@ -69,8 +67,6 @@ export function ProjectSidebar({
   const sceneGraphSummary = getSceneGraphSummary(semanticDraft?.sceneGraph);
   const editableSummary = getEditableObjectsSummary(semanticDraft?.editableObjects);
   const conceptSummary = getConceptDNASummary(semanticDraft?.styleConsistency, semanticDraft?.editableObjects);
-  const mutationSummary = getDesignMutationsSummary(semanticDraft?.designMutations);
-  const generationBridgeSummary = getGenerationBridgeSummary(semanticDraft);
 
   return (
     <div>
@@ -235,47 +231,6 @@ export function ProjectSidebar({
         </div>
         <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>High safety: {editableSummary.highSafety}</div>
         <div style={{ fontSize: "13px", lineHeight: 1.5 }}>Risky: {editableSummary.risky}</div>
-      </div>
-
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Design Mutations</div>
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "16px",
-          marginBottom: "16px",
-          border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-          background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
-        }}
-      >
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>total: {mutationSummary.total}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>low risk: {mutationSummary.lowRisk}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>premium: {mutationSummary.premium}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5 }}>budget optimization: {mutationSummary.budgetOptimization}</div>
-      </div>
-
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Generation Bridge</div>
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "16px",
-          marginBottom: "16px",
-          border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-          background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
-        }}
-      >
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          packages total: {generationBridgeSummary.total}
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          draft packages: {generationBridgeSummary.draft}
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          requires image-to-image: {generationBridgeSummary.requiresImageToImage}
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          requires mask: {generationBridgeSummary.requiresMask}
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5 }}>ready: {generationBridgeSummary.ready}</div>
       </div>
 
       <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Прогресс проекта</div>

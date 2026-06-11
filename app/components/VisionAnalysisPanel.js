@@ -1,15 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { getMutationPrompt } from "../lib/designMutationUtils";
-import {
-  applyGenerationPackageReadiness,
-  evaluateGenerationPackageReadiness,
-  getGenerationPackagesByMutation,
-} from "../lib/generationPackageUtils";
 import { formatEditTypesRu } from "../lib/editableObjectsUtils";
 import { getConceptDNA } from "../lib/styleConsistencyUtils";
 import { getSafeAnalysisTheme, isLightSwatchColor } from "../lib/getSafeAnalysisTheme";
+import { ConceptIntentSection } from "./ConceptIntentSection";
 import { SupplierMatchesSection } from "./SupplierMatchesSection";
 import { VisualProductDiscoverySection } from "./VisualProductDiscoverySection";
 import {
@@ -105,11 +100,12 @@ function Section({ label, children, theme, isMobile = false, sectionKey }) {
     return (
       <div
         style={{
-          gridColumn: "1 / -1",
-          borderRadius: "14px",
-          padding: theme.cardPadding,
-          background: theme.cardBackground,
-          border: `1px solid ${theme.border}`,
+          width: "100%",
+          padding: theme.cardPadding || "18px 0",
+          background: "transparent",
+          border: "none",
+          borderBottom: `1px solid ${theme.border}`,
+          borderRadius: 0,
           boxSizing: "border-box",
         }}
       >
@@ -546,9 +542,6 @@ function EditableElementsSection({ editableObjects, theme, text, isMobile = fals
             <div style={{ ...text, fontSize: "12px", color: theme.textSecondary }}>
               Стиль: {entry.styleImpact || "medium"} · Бюджет: {entry.budgetImpact || "medium"}
             </div>
-            <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>
-              Подсказка: {entry.promptHintRu}
-            </div>
             {entry.styleConsistencyImpact ? (
               <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 <div style={{ ...text, fontSize: "12px", color: theme.textSecondary }}>
@@ -578,238 +571,6 @@ function EditableElementsSection({ editableObjects, theme, text, isMobile = fals
           </div>
         ))}
       </div>
-    </Section>
-  );
-}
-
-function formatReadinessReasons(reasons) {
-  const list = Array.isArray(reasons) ? reasons : [];
-  return list.map((reason) => (reason === "нет preserveRules" ? "пакет не готов" : reason));
-}
-
-function DesignMutationsSection({
-  designMutations,
-  generationPackages,
-  semanticDraft,
-  theme,
-  text,
-  onPrepareGenerationPackage,
-  sourceImageId,
-  sourceImageBase64,
-  onControlledRegenerate,
-  isControlledRegenerating,
-  controlledRegenerationError,
-  controlledRegenerationResult,
-  onAnalyzeControlledVisual,
-  isMobile = false,
-}) {
-  const items = Array.isArray(designMutations) ? designMutations : [];
-  const [selectedMutationId, setSelectedMutationId] = useState("");
-  if (!items.length) return null;
-
-  const selectedMutation = items.find((mutation) => mutation.id === selectedMutationId) || null;
-  const preparedPackage = selectedMutation
-    ? getGenerationPackagesByMutation({ generationPackages }, selectedMutation.id)[0] || null
-    : null;
-  const readiness = preparedPackage
-    ? evaluateGenerationPackageReadiness(preparedPackage, {
-        sourceImageId: sourceImageId || preparedPackage.sourceImageId || "",
-        sourceImageBase64: sourceImageBase64 || "",
-      })
-    : { ready: false, reasons: ["пакет не готов"] };
-  const preparedPrompt =
-    preparedPackage?.promptRu || (selectedMutation ? getMutationPrompt(selectedMutation, semanticDraft) : "");
-
-  return (
-    <Section label="Варианты развития концепции" theme={theme} isMobile={isMobile} sectionKey="mutations">
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-        {items.map((mutation) => (
-          <div
-            key={mutation.id}
-            style={{
-              padding: isMobile ? "10px 0" : "12px",
-              borderRadius: isMobile ? "0" : "12px",
-              border: isMobile ? "none" : `1px solid ${selectedMutationId === mutation.id ? theme.accentBorder || theme.border : theme.border}`,
-              background: isMobile ? "transparent" : theme.cardBackground,
-              borderBottom: isMobile ? `1px solid ${theme.border}` : undefined,
-            }}
-          >
-            <div style={{ ...text, fontWeight: 600 }}>{mutation.labelRu}</div>
-            <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>{mutation.goalRu}</div>
-            {mutation.preserveDNA?.length ? (
-              <div style={{ ...text, marginTop: "8px", fontSize: "12px", color: theme.textSecondary }}>
-                Сохранить: {mutation.preserveDNA.join(", ")}
-              </div>
-            ) : null}
-            {mutation.changeTargets?.length ? (
-              <div style={{ ...text, marginTop: "4px", fontSize: "12px", color: theme.textSecondary }}>
-                Изменить: {mutation.changeTargets.join(", ")}
-              </div>
-            ) : null}
-            <div style={{ ...text, marginTop: "8px", fontSize: "12px", color: theme.textSecondary }}>
-              Стиль: {mutation.styleImpact} · Бюджет: {mutation.budgetImpact} · Риск: {mutation.riskLevel}
-            </div>
-            <div style={{ ...text, marginTop: "8px", fontSize: "12px", lineHeight: 1.45 }}>
-              Prompt: {mutation.promptTemplateRu}
-            </div>
-            {mutation.noteRu ? (
-              <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>{mutation.noteRu}</div>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedMutationId(mutation.id);
-                onPrepareGenerationPackage?.(mutation);
-              }}
-              style={{
-                marginTop: "10px",
-                padding: "8px 12px",
-                borderRadius: "999px",
-                border: `1px solid ${theme.border}`,
-                background: "transparent",
-                color: "inherit",
-                font: "inherit",
-                fontSize: "12px",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              Подготовить итерацию
-            </button>
-          </div>
-        ))}
-      </div>
-      {selectedMutation ? (
-        <div
-          style={{
-            marginTop: "12px",
-            padding: isMobile ? "10px 0" : "12px",
-            borderRadius: isMobile ? "0" : "12px",
-            border: isMobile ? "none" : `1px dashed ${theme.border}`,
-            background: isMobile ? "transparent" : theme.cardBackground,
-            borderTop: isMobile ? `1px dashed ${theme.border}` : undefined,
-          }}
-        >
-          <div style={{ ...text, fontSize: "12px", fontWeight: 600, marginBottom: "6px" }}>
-            {preparedPackage ? "Пакет итерации подготовлен" : "Подготовленный prompt"}
-          </div>
-          {preparedPackage ? (
-            <>
-              <div style={{ ...text, fontSize: "12px", lineHeight: 1.45 }}>Цель: {preparedPackage.goalRu || selectedMutation.goalRu}</div>
-              {preparedPackage.preserveRules?.length ? (
-                <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>
-                  Сохранить: {preparedPackage.preserveRules.join(", ")}
-                </div>
-              ) : null}
-              {preparedPackage.changeTargets?.length ? (
-                <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>
-                  Изменить: {preparedPackage.changeTargets.join(", ")}
-                </div>
-              ) : null}
-              <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>
-                Риск: {preparedPackage.riskLevel} · status: {preparedPackage.status} · readyForGeneration:{" "}
-                {preparedPackage.readyForGeneration ? "true" : "false"}
-              </div>
-              <div style={{ ...text, marginTop: "8px", fontSize: "12px", lineHeight: 1.5 }}>
-                promptRu: {preparedPackage.promptRu}
-              </div>
-              <div style={{ ...text, marginTop: "8px", fontSize: "12px", lineHeight: 1.5 }}>
-                negativePromptRu: {preparedPackage.negativePromptRu}
-              </div>
-              <button
-                type="button"
-                disabled={!readiness.ready || isControlledRegenerating}
-                onClick={() => {
-                  const readyPackage = applyGenerationPackageReadiness(preparedPackage, {
-                    sourceImageId: sourceImageId || preparedPackage.sourceImageId || "",
-                    sourceImageBase64: sourceImageBase64 || "",
-                  });
-                  onControlledRegenerate?.(readyPackage);
-                }}
-                style={{
-                  marginTop: "12px",
-                  padding: "8px 12px",
-                  borderRadius: "999px",
-                  border: `1px solid ${theme.border}`,
-                  background: readiness.ready ? theme.accentBackground || "transparent" : "transparent",
-                  color: "inherit",
-                  font: "inherit",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: readiness.ready && !isControlledRegenerating ? "pointer" : "default",
-                  opacity: readiness.ready && !isControlledRegenerating ? 1 : 0.55,
-                }}
-              >
-                {isControlledRegenerating ? "Создание controlled-итерации..." : "Создать controlled-итерацию"}
-              </button>
-              {!readiness.ready ? (
-                <div style={{ ...text, marginTop: "8px", fontSize: "12px", color: theme.textSecondary }}>
-                  {formatReadinessReasons(readiness.reasons).join("; ")}
-                </div>
-              ) : null}
-              {controlledRegenerationError ? (
-                <div style={{ ...text, marginTop: "8px", fontSize: "12px", color: theme.dangerText || "#b42318" }}>
-                  {controlledRegenerationError}
-                </div>
-              ) : null}
-              {controlledRegenerationResult?.visualId ? (
-                <div
-                  style={{
-                    marginTop: "12px",
-                    padding: isMobile ? "10px 0" : "10px",
-                    borderRadius: isMobile ? "0" : "10px",
-                    border: isMobile ? "none" : `1px solid ${theme.border}`,
-                    background: isMobile ? "transparent" : theme.cardBackground,
-                  }}
-                >
-                  <div style={{ ...text, fontSize: "12px", fontWeight: 600 }}>Controlled-итерация создана</div>
-                  <div style={{ ...text, marginTop: "6px", fontSize: "12px", lineHeight: 1.45 }}>
-                    Родительская сцена: {controlledRegenerationResult.parentVisualId}
-                  </div>
-                  {controlledRegenerationResult.mutationLabel ? (
-                    <div style={{ ...text, marginTop: "4px", fontSize: "12px", lineHeight: 1.45 }}>
-                      Mutation: {controlledRegenerationResult.mutationLabel}
-                    </div>
-                  ) : null}
-                  {controlledRegenerationResult.preserveRules?.length ? (
-                    <div style={{ ...text, marginTop: "4px", fontSize: "12px", lineHeight: 1.45 }}>
-                      Сохранено: {controlledRegenerationResult.preserveRules.join(", ")}
-                    </div>
-                  ) : null}
-                  {controlledRegenerationResult.changeTargets?.length ? (
-                    <div style={{ ...text, marginTop: "4px", fontSize: "12px", lineHeight: 1.45 }}>
-                      Изменено: {controlledRegenerationResult.changeTargets.join(", ")}
-                    </div>
-                  ) : null}
-                  <div style={{ ...text, marginTop: "4px", fontSize: "12px", lineHeight: 1.45 }}>
-                    Статус: {controlledRegenerationResult.status || "completed"}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onAnalyzeControlledVisual?.(controlledRegenerationResult.visualId)}
-                    style={{
-                      marginTop: "10px",
-                      padding: "8px 12px",
-                      borderRadius: "999px",
-                      border: `1px solid ${theme.border}`,
-                      background: "transparent",
-                      color: "inherit",
-                      font: "inherit",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Проанализировать новую версию
-                  </button>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <div style={{ ...text, fontSize: "12px", lineHeight: 1.5 }}>{preparedPrompt}</div>
-          )}
-        </div>
-      ) : null}
     </Section>
   );
 }
@@ -1094,6 +855,36 @@ function withMobileTheme(theme, isMobile) {
   };
 }
 
+function ConceptIntentBlock({
+  semanticDraft,
+  theme,
+  text,
+  isMobile,
+  onConceptIntentSubmit,
+  isConceptIntentProcessing,
+  conceptIntentError,
+  conceptIntentSuccess,
+  conceptIntentResultVisualId,
+  onAnalyzeConceptResult,
+}) {
+  if (!semanticDraft) return null;
+  return (
+    <div style={{ width: "100%", minWidth: 0, alignSelf: "stretch", flex: "none" }}>
+      <ConceptIntentSection
+        theme={theme}
+        text={text}
+        isMobile={isMobile}
+        isProcessing={isConceptIntentProcessing}
+        feedbackError={conceptIntentError}
+        feedbackSuccess={conceptIntentSuccess}
+        resultVisualId={conceptIntentResultVisualId}
+        onSubmitIntent={onConceptIntentSubmit}
+        onAnalyzeResult={onAnalyzeConceptResult}
+      />
+    </div>
+  );
+}
+
 export function VisionAnalysisPanel({
   semanticDraft,
   activeMode,
@@ -1102,14 +893,12 @@ export function VisionAnalysisPanel({
   revealStyle,
   budgetDraft,
   onCreateBudgetDraft,
-  onPrepareGenerationPackage,
-  sourceImageId,
-  sourceImageBase64,
-  onControlledRegenerate,
-  isControlledRegenerating,
-  controlledRegenerationError,
-  controlledRegenerationResult,
-  onAnalyzeControlledVisual,
+  onConceptIntentSubmit,
+  isConceptIntentProcessing = false,
+  conceptIntentError = "",
+  conceptIntentSuccess = "",
+  conceptIntentResultVisualId = "",
+  onAnalyzeConceptResult,
   showVisualProductDiscovery = false,
   visualProductCandidates = [],
   visualProductCandidatesLoading = false,
@@ -1137,7 +926,7 @@ export function VisionAnalysisPanel({
   const pro = semanticDraft.proAnalysis || {};
   const spec = semanticDraft.specAnalysis || {};
 
-  const panelShell = (desktopRadius) =>
+  const panelShell = () =>
     isMobile
       ? {
           ...revealStyle,
@@ -1157,18 +946,18 @@ export function VisionAnalysisPanel({
           maxWidth: "100%",
           minWidth: 0,
           boxSizing: "border-box",
-          display: "grid",
-          gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-          gap: theme.sectionGap,
-          padding: theme.panelPadding,
-          borderRadius: desktopRadius,
-          background: theme.background,
-          border: `1px solid ${theme.border}`,
+          display: "flex",
+          flexDirection: "column",
+          gap: 0,
+          padding: 0,
+          borderRadius: 0,
+          background: "transparent",
+          border: "none",
         };
 
   if (analysisMode === "quick") {
     return (
-      <div className="osa-analysis-panel" style={panelShell("14px")}>
+      <div className="osa-analysis-panel" style={panelShell()}>
         <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.quick}`} theme={theme} isMobile={isMobile} sectionKey="mode-quick">
           <div style={{ ...text, fontSize: "13px", color: theme.textSecondary, textTransform: "none", letterSpacing: "normal" }}>
             Быстрый творческий разбор сцены
@@ -1213,7 +1002,7 @@ export function VisionAnalysisPanel({
 
   if (analysisMode === "pro") {
     return (
-      <div className="osa-analysis-panel" style={panelShell("16px")}>
+      <div className="osa-analysis-panel" style={panelShell()}>
         <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.pro}`} theme={theme} isMobile={isMobile} sectionKey="mode-pro">
           <div style={{ ...text, fontSize: "13px", color: theme.textSecondary, textTransform: "none", letterSpacing: "normal" }}>
             Профессиональная интерьерная карта
@@ -1433,28 +1222,24 @@ export function VisionAnalysisPanel({
           isMobile={isMobile}
           isDark={isDark}
         />
-        <DesignMutationsSection
-          designMutations={semanticDraft.designMutations}
-          generationPackages={semanticDraft.generationPackages}
+        <ConceptIntentBlock
           semanticDraft={semanticDraft}
           theme={theme}
           text={text}
-          onPrepareGenerationPackage={onPrepareGenerationPackage}
-          sourceImageId={sourceImageId}
-          sourceImageBase64={sourceImageBase64}
-          onControlledRegenerate={onControlledRegenerate}
-          isControlledRegenerating={isControlledRegenerating}
-          controlledRegenerationError={controlledRegenerationError}
-          controlledRegenerationResult={controlledRegenerationResult}
-          onAnalyzeControlledVisual={onAnalyzeControlledVisual}
           isMobile={isMobile}
+          onConceptIntentSubmit={onConceptIntentSubmit}
+          isConceptIntentProcessing={isConceptIntentProcessing}
+          conceptIntentError={conceptIntentError}
+          conceptIntentSuccess={conceptIntentSuccess}
+          conceptIntentResultVisualId={conceptIntentResultVisualId}
+          onAnalyzeConceptResult={onAnalyzeConceptResult}
         />
       </div>
     );
   }
 
   return (
-    <div className="osa-analysis-panel" style={panelShell("16px")}>
+    <div className="osa-analysis-panel" style={panelShell()}>
       <Section label={`Режим ${ANALYSIS_MODE_LABELS_RU.spec}`} theme={theme} isMobile={isMobile} sectionKey="mode-spec">
         <div style={{ ...text, fontSize: "13px", color: theme.textSecondary, textTransform: "none", letterSpacing: "normal" }}>
           Подготовка к SKU, BIM и смете
@@ -1574,21 +1359,17 @@ export function VisionAnalysisPanel({
       <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
       <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
       <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
-      <DesignMutationsSection
-        designMutations={semanticDraft.designMutations}
-        generationPackages={semanticDraft.generationPackages}
+      <ConceptIntentBlock
         semanticDraft={semanticDraft}
         theme={theme}
         text={text}
-        onPrepareGenerationPackage={onPrepareGenerationPackage}
-        sourceImageId={sourceImageId}
-        sourceImageBase64={sourceImageBase64}
-        onControlledRegenerate={onControlledRegenerate}
-        isControlledRegenerating={isControlledRegenerating}
-        controlledRegenerationError={controlledRegenerationError}
-        controlledRegenerationResult={controlledRegenerationResult}
-        onAnalyzeControlledVisual={onAnalyzeControlledVisual}
         isMobile={isMobile}
+        onConceptIntentSubmit={onConceptIntentSubmit}
+        isConceptIntentProcessing={isConceptIntentProcessing}
+        conceptIntentError={conceptIntentError}
+        conceptIntentSuccess={conceptIntentSuccess}
+        conceptIntentResultVisualId={conceptIntentResultVisualId}
+        onAnalyzeConceptResult={onAnalyzeConceptResult}
       />
       <VisualProductDiscoveryBlock
         showVisualProductDiscovery={showVisualProductDiscovery}

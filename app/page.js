@@ -22,6 +22,7 @@ import {
 } from "./lib/validateSemanticDraft";
 import { extractImagePalette } from "./lib/extractImagePalette";
 import { VisionAnalysisPanel } from "./components/VisionAnalysisPanel";
+import { PlatformHeroBanner } from "./components/PlatformHeroBanner";
 import { AnalysisQualityCheckPanel } from "./components/AnalysisQualityCheckPanel";
 import { ProjectMemory } from "./components/project/ProjectMemory";
 import { ProjectSidebar } from "./components/project/ProjectSidebar";
@@ -57,6 +58,7 @@ import {
   isOpenAiGeoBlockError,
 } from "./lib/visualProduct/demoSemanticDraftFallback";
 import { attachBudgetContextToMutations } from "./lib/designMutationUtils";
+import { resolveConceptIntentMutation } from "./lib/conceptIntentPipeline";
 import {
   applyGenerationPackageReadiness,
   createGenerationPackageFromMutation,
@@ -1954,6 +1956,29 @@ export default function Home() {
         generationPackages: [...rest, readyPackage],
       })
     );
+    return readyPackage;
+  };
+
+  const handleConceptIntentUpdate = async (userIntent) => {
+    const intent = typeof userIntent === "string" ? userIntent.trim() : "";
+    if (!semanticDraft || !intent || isControlledRegenerating || isRunning) return;
+
+    setControlledRegenerationError("");
+    setControlledRegenerationResult(null);
+
+    const mutation = resolveConceptIntentMutation(intent, semanticDraft);
+    if (!mutation) {
+      setControlledRegenerationError("Опишите изменение чуть подробнее.");
+      return;
+    }
+
+    const readyPackage = handlePrepareGenerationPackage(mutation);
+    if (!readyPackage) {
+      setControlledRegenerationError("Не удалось подготовить обновление концепции.");
+      return;
+    }
+
+    await handleControlledRegenerate(readyPackage);
   };
 
   const patchGenerationPackageInDraft = (packageId, patch) => {
@@ -2826,12 +2851,16 @@ export default function Home() {
   const workspaceHeaderMinimalStyle = {
     width: "100%",
     boxSizing: "border-box",
-    padding: "6px 0 8px 0",
-    marginBottom: "4px",
-    borderBottom: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.04)",
-    background: isDark ? "rgba(18,19,21,0.28)" : "rgba(255,255,255,0.55)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
+    padding: isMobile ? "6px 0 8px 0" : "0",
+    marginBottom: isMobile ? "4px" : "0",
+    borderBottom: isMobile
+      ? isDark
+        ? "1px solid rgba(255,255,255,0.05)"
+        : "1px solid rgba(0,0,0,0.04)"
+      : "none",
+    background: isMobile ? (isDark ? "rgba(18,19,21,0.28)" : "rgba(255,255,255,0.55)") : "transparent",
+    backdropFilter: isMobile ? "blur(12px)" : "none",
+    WebkitBackdropFilter: isMobile ? "blur(12px)" : "none",
   };
 
   const workspaceGridStyle = {
@@ -2845,8 +2874,8 @@ export default function Home() {
   };
 
   const sidePanelBaseStyle = {
-    borderRadius: isMobile ? "18px" : "22px",
-    padding: rv(isMobile, "20px 18px", "14px 16px"),
+    borderRadius: isMobile ? "18px" : "16px",
+    padding: rv(isMobile, "20px 18px", "12px 14px"),
     boxSizing: "border-box",
     background: isDark
       ? "linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))"
@@ -2859,6 +2888,15 @@ export default function Home() {
     WebkitBackdropFilter: isDark ? "blur(18px)" : "blur(12px)",
     transition: "all 0.6s ease",
     minWidth: 0,
+    ...(!isMobile
+      ? {
+          background: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.28)",
+          border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.03)",
+          boxShadow: "none",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+        }
+      : {}),
   };
 
   const rightContextAsideStyle = {
@@ -2890,142 +2928,6 @@ export default function Home() {
     display: "flex",
     flexDirection: "column",
     alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
-  };
-
-  const panelStyle = {
-    width: "100%",
-    maxWidth: rv(isMobile, "100%", "none"),
-    borderRadius: rv(isMobile, "28px", "20px"),
-    padding: rv(isMobile, "28px 40px 52px 40px", "16px 14px 24px 14px"),
-    textAlign: "center",
-    boxSizing: "border-box",
-    background: isDark
-      ? workspaceProjectPalette?.panelBackgroundDark ??
-        "linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))"
-      : `${lightAmbientPanelOverlay}${
-          workspaceProjectPalette?.panelBackgroundLight ??
-          "linear-gradient(168deg, rgba(246,244,250,0.55) 0%, rgba(234,232,242,0.72) 42%, rgba(238,234,228,0.88) 100%)"
-        }`,
-    border:
-      workspaceProjectPalette?.panelBorder ??
-      (isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)"),
-    boxShadow:
-      workspaceProjectPalette?.panelShadow ??
-      (isDark
-        ? "0 30px 80px rgba(0,0,0,0.34)"
-        : "0 10px 30px rgba(0,0,0,0.06), 0 2px 28px rgba(160,150,190,0.08), inset 0 1px 0 rgba(255,255,255,0.6)"),
-    backdropFilter: isDark ? "blur(18px)" : "blur(12px)",
-    WebkitBackdropFilter: isDark ? "blur(18px)" : "blur(12px)",
-    transition: workspaceProjectPalette ? PROJECT_UI_SURFACE_TRANSITION : "all 0.6s ease",
-  };
-
-  const badgeStyle = {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: "10px",
-    padding: "8px 14px",
-    borderRadius: "999px",
-    marginBottom: "14px",
-    fontSize: "13px",
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    background: isDark ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.45)",
-    border: isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid rgba(0,0,0,0.04)",
-    color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.88)",
-    transition: "all 0.6s ease",
-  };
-
-  const heroBadgeStyle = {
-    ...badgeStyle,
-    marginBottom: isMobile ? "10px" : "26px",
-    position: "relative",
-    zIndex: 1,
-  };
-
-  const heroLogoAnchorStyle = {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    width: "100%",
-    marginBottom: "6px",
-    zIndex: 1,
-  };
-
-  const heroLogoGlowOrbStyle = {
-    position: "absolute",
-    left: "50%",
-    top: "48%",
-    transform: "translate(-50%, -50%)",
-    width: isMobile ? "min(220px, 70vw)" : "min(720px, 110vw)",
-    height: isMobile ? "min(220px, 70vw)" : "min(720px, 110vw)",
-    maxWidth: isMobile ? "260px" : "820px",
-    maxHeight: isMobile ? "260px" : "820px",
-    borderRadius: "50%",
-    background: isDark
-      ? "radial-gradient(circle at center, rgba(183,157,138,0.18) 0%, rgba(183,157,138,0.08) 38%, transparent 70%)"
-      : "radial-gradient(circle at center, rgba(183,157,138,0.22) 0%, rgba(160,150,190,0.11) 42%, rgba(183,157,138,0.06) 58%, transparent 74%)",
-    filter: "blur(42px)",
-    pointerEvents: "none",
-    zIndex: 0,
-    opacity: visible ? 1 : 0,
-    transition: "opacity 1s ease",
-  };
-
-  const heroLogoInnerWrapStyle = {
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1,
-    padding: isMobile ? "4px 0 6px 0" : "8px 0 12px 0",
-  };
-
-  const heroSectionStyle = {
-    position: "relative",
-    width: "100%",
-    maxWidth: rv(isMobile, "1040px", "100%"),
-    margin: "0 auto",
-    marginTop: isMobile ? "0" : "clamp(4px, 1.5vw, 16px)",
-    padding: rv(isMobile, "8px 12px 40px 12px", "4px 8px 16px 8px"),
-    boxSizing: "border-box",
-    textAlign: "center",
-    animation: "osaHeroEnter 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both",
-    background: isDark
-      ? "transparent"
-      : `${lightAmbientHeroOverlay}linear-gradient(to bottom, rgba(255,252,245,0.94), rgba(245,235,220,0.78), rgba(240,228,210,0.65))`,
-  };
-
-  const titleStyle = {
-    fontSize: isMobile ? "clamp(1.5rem, 6.5vw, 34px)" : "clamp(2.875rem, 4.8vw, 3.875rem)",
-    lineHeight: isMobile ? "1.12" : "1.05",
-    fontWeight: isDark ? "600" : "650",
-    letterSpacing: isMobile ? "normal" : "-0.022em",
-    wordSpacing: isMobile ? "normal" : undefined,
-    margin: isMobile ? "0 0 12px 0" : "0 0 24px 0",
-    position: "relative",
-    zIndex: 1,
-    color: isDark ? "#FAFAF8" : "#2B2B2B",
-    width: isMobile ? "100%" : undefined,
-    maxWidth: isMobile ? "100%" : undefined,
-    boxSizing: "border-box",
-    wordBreak: isMobile ? "normal" : undefined,
-    overflowWrap: isMobile ? "normal" : undefined,
-    textShadow: isDark
-      ? "0 2px 20px rgba(0,0,0,0.4), 0 4px 36px rgba(0,0,0,0.25)"
-      : "0 2px 18px rgba(255,255,255,0.75), 0 3px 28px rgba(160,150,190,0.10)",
-  };
-
-  const textStyle = {
-    maxWidth: rv(isMobile, "720px", "100%"),
-    margin: isMobile ? "0 auto 18px auto" : "0 auto 40px auto",
-    fontSize: isMobile ? "0.9375rem" : "19px",
-    lineHeight: isMobile ? "1.55" : "1.72",
-    color: isDark ? "rgba(243,238,231,0.74)" : "#6E6A66",
-    transition: "color 0.6s ease",
-    position: "relative",
-    zIndex: 1,
   };
 
   const contextPlaceholderCardStyle = {
@@ -3083,36 +2985,6 @@ export default function Home() {
       : {}),
   };
 
-  const heroCtaPrimaryStyle = {
-    ...primaryButton,
-    padding: isMobile ? "14px 20px" : "17px 36px",
-    fontSize: isMobile ? "15px" : "17px",
-    borderRadius: isMobile ? "14px" : "16px",
-    minWidth: isMobile ? "0" : "196px",
-    width: isMobile ? "100%" : undefined,
-    boxSizing: "border-box",
-    transition:
-      "transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.38s ease, filter 0.38s ease",
-  };
-
-  const heroCtaPrimaryShadowDefault = isDark
-    ? "0 14px 36px rgba(183,157,138,0.38), 0 0 30px rgba(183,157,138,0.4)"
-    : "0 8px 20px rgba(183,157,138,0.25), 0 10px 26px rgba(160,150,190,0.12), 0 2px 10px rgba(0,0,0,0.05), 0 0 34px rgba(183,157,138,0.2), 0 0 52px rgba(214,197,180,0.14), inset 0 1px 0 rgba(255,255,255,0.4)";
-
-  const heroCtaPrimaryShadowHover = isDark
-    ? "0 20px 52px rgba(183,157,138,0.5), 0 0 48px rgba(183,157,138,0.45), 0 0 90px rgba(183,157,138,0.2)"
-    : "0 10px 24px rgba(183,157,138,0.28), 0 14px 32px rgba(160,150,190,0.14), 0 2px 12px rgba(0,0,0,0.06), 0 0 46px rgba(183,157,138,0.28), 0 0 72px rgba(214,197,180,0.2), inset 0 1px 0 rgba(255,255,255,0.45)";
-
-  const heroCtaSecondaryStyle = {
-    ...secondaryButton,
-    padding: isMobile ? "12px 16px" : "17px 36px",
-    fontSize: isMobile ? "13px" : "17px",
-    borderRadius: isMobile ? "14px" : "16px",
-    minWidth: isMobile ? "0" : "196px",
-    width: isMobile ? "100%" : undefined,
-    boxSizing: "border-box",
-  };
-
   const statCardLightShadowDefault = workspaceProjectPalette
     ? workspaceProjectPalette.statLightShadowDefault
     : "0 8px 22px rgba(0,0,0,0.06), 0 1px 0 rgba(160,150,190,0.08), inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -1px 0 rgba(0,0,0,0.02)";
@@ -3166,7 +3038,7 @@ export default function Home() {
     width: "100%",
     maxWidth: rv(isMobile, "760px", "100%"),
     margin: "0 auto",
-    padding: 0,
+    padding: isMobile ? 0 : "0 24px 24px 24px",
     boxSizing: "border-box",
     display: isMobile ? "grid" : "flex",
     gridTemplateColumns: isMobile ? "1fr" : undefined,
@@ -3179,23 +3051,18 @@ export default function Home() {
     WebkitOverflowScrolling: undefined,
   };
 
-  const workspaceCardStyle = {
+  const workspaceCanvasStyle = {
     maxWidth: isMobile ? "100%" : isAnalyzeMode ? "min(1080px, 100%)" : "760px",
     width: "100%",
-    margin: isMobile ? "10px auto 16px auto" : "28px auto 48px auto",
-    borderRadius: isMobile ? "18px" : "22px",
-    padding: isMobile
-      ? isAnalyzeMode
-        ? "14px 12px"
-        : "16px 12px"
-      : isAnalyzeMode
-        ? "18px 16px"
-        : "22px 20px",
+    margin: isMobile ? "10px auto 16px auto" : "8px auto 24px auto",
+    borderRadius: isMobile ? "18px" : "20px",
+    padding: 0,
+    overflow: "hidden",
     textAlign: "center",
     boxSizing: "border-box",
     display: "flex",
     flexDirection: "column",
-    alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
+    alignItems: "stretch",
     ...(workspaceProjectPalette
       ? {
           background: isDark
@@ -3207,6 +3074,13 @@ export default function Home() {
           boxShadow: isDark
             ? workspaceProjectPalette.workspaceCardDark.boxShadow
             : workspaceProjectPalette.workspaceCardLight.boxShadow,
+          ...(isMobile
+            ? {}
+            : {
+                boxShadow: isDark
+                  ? "0 22px 56px rgba(0,0,0,0.26), 0 0 72px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.05)"
+                  : "0 10px 36px rgba(0,0,0,0.07), 0 0 64px rgba(255,255,255,0.55), inset 0 1px 0 rgba(255,255,255,0.75)",
+              }),
         }
       : {
           background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
@@ -3214,11 +3088,38 @@ export default function Home() {
           boxShadow: isDark
             ? "0 22px 60px rgba(0,0,0,0.18)"
             : "0 10px 30px rgba(0,0,0,0.06), 0 2px 24px rgba(160,150,190,0.07), inset 0 1px 0 rgba(255,255,255,0.58)",
+          ...(isMobile
+            ? {}
+            : {
+                background: isDark ? "rgba(255,255,255,0.042)" : "rgba(255,255,255,0.62)",
+                border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)",
+                boxShadow: isDark
+                  ? "0 28px 64px rgba(0,0,0,0.32), 0 0 88px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)"
+                  : "0 14px 44px rgba(0,0,0,0.09), 0 0 72px rgba(255,255,255,0.62), inset 0 1px 0 rgba(255,255,255,0.78)",
+              }),
         }),
-    backdropFilter: isDark ? "blur(18px)" : "blur(12px)",
-    WebkitBackdropFilter: isDark ? "blur(18px)" : "blur(12px)",
+    backdropFilter: isDark ? "blur(20px)" : "blur(14px)",
+    WebkitBackdropFilter: isDark ? "blur(20px)" : "blur(14px)",
     transition: workspaceProjectPalette ? PROJECT_UI_SURFACE_TRANSITION : "all 0.6s ease",
   };
+
+  const workspaceBodyStyle = {
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    padding: isMobile
+      ? isAnalyzeMode
+        ? "14px 12px"
+        : "16px 12px"
+      : isAnalyzeMode
+        ? "20px 22px 24px 22px"
+        : "22px 24px 26px 24px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
+  };
+
+  const desktopGraphiteBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
 
   const workspaceGeneratePromptBlockStyle = {
     width: "100%",
@@ -3242,13 +3143,13 @@ export default function Home() {
   const modeTabsWrapperStyle = {
     maxWidth: rv(isMobile, "680px", "none"),
     width: "100%",
-    margin: isMobile ? "0 auto 20px auto" : "0 auto 36px auto",
-    padding: isMobile ? "5px" : "7px",
-    borderRadius: isMobile ? "16px" : "18px",
+    margin: isMobile ? "0 auto 20px auto" : "0 auto 24px auto",
+    padding: isMobile ? "5px" : "5px",
+    borderRadius: isMobile ? "16px" : "14px",
     position: "relative",
     zIndex: 1,
     display: "flex",
-    gap: isMobile ? "4px" : "6px",
+    gap: isMobile ? "4px" : "4px",
     background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)",
     border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
     boxShadow: isDark
@@ -3256,6 +3157,13 @@ export default function Home() {
       : "0 8px 24px rgba(0,0,0,0.05), 0 1px 20px rgba(160,150,190,0.08), inset 0 1px 0 rgba(255,255,255,0.55)",
     backdropFilter: isDark ? "blur(16px)" : "blur(12px)",
     WebkitBackdropFilter: isDark ? "blur(16px)" : "blur(12px)",
+    ...(!isMobile
+      ? {
+          boxShadow: "none",
+          border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.03)",
+          background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.34)",
+        }
+      : {}),
   };
 
   const workspaceModeTabsStickyStyle = {
@@ -3357,7 +3265,9 @@ export default function Home() {
       ? "rgba(0,0,0,0.16)"
       : workspaceProjectPalette
         ? workspaceProjectPalette.secondaryBackground
-        : "rgba(239,231,220,0.55)",
+        : isMobile
+          ? "rgba(239,231,220,0.55)"
+          : "rgba(255,255,255,0.42)",
     color: isDark ? "#F3EEE7" : "#2B2B2B",
     fontSize: "15px",
     lineHeight: "1.6",
@@ -3394,7 +3304,7 @@ export default function Home() {
     maxWidth: "100%",
     minWidth: 0,
     marginTop: "18px",
-    borderRadius: "18px",
+    borderRadius: isMobile ? "18px" : "14px",
     overflow: "hidden",
     boxSizing: "border-box",
     alignSelf: "stretch",
@@ -3405,25 +3315,45 @@ export default function Home() {
       : "0 6px 22px rgba(0,0,0,0.05), 0 1px 16px rgba(160,150,190,0.07), inset 0 1px 0 rgba(255,255,255,0.52)",
     backdropFilter: isDark ? "none" : "blur(12px)",
     WebkitBackdropFilter: isDark ? "none" : "blur(12px)",
+    ...(!isMobile
+      ? {
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
+          backdropFilter: "none",
+          WebkitBackdropFilter: "none",
+          borderRadius: "0",
+        }
+      : {}),
   };
 
   const aiResultHeaderBaseStyle = {
-    padding: isMobile ? "12px 12px 10px 12px" : "16px 16px 14px 16px",
-    borderBottom: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+    padding: isMobile ? "12px 12px 10px 12px" : "12px 0 10px 0",
+    borderBottom: isMobile
+      ? isDark
+        ? "1px solid rgba(255,255,255,0.08)"
+        : "1px solid rgba(0,0,0,0.04)"
+      : isDark
+        ? "1px solid rgba(255,255,255,0.05)"
+        : "1px solid rgba(0,0,0,0.03)",
   };
 
   const aiResultHeaderGenerateStyle = {
     ...aiResultHeaderBaseStyle,
-    background: isDark
-      ? "linear-gradient(135deg, rgba(183,157,138,0.30) 0%, rgba(255,255,255,0.05) 70%)"
-      : "linear-gradient(135deg, rgba(183,157,138,0.20) 0%, rgba(160,150,190,0.08) 55%, rgba(255,255,255,0.35) 100%)",
+    background: isMobile
+      ? isDark
+        ? "linear-gradient(135deg, rgba(183,157,138,0.30) 0%, rgba(255,255,255,0.05) 70%)"
+        : "linear-gradient(135deg, rgba(183,157,138,0.20) 0%, rgba(160,150,190,0.08) 55%, rgba(255,255,255,0.35) 100%)"
+      : "transparent",
   };
 
   const aiResultHeaderAnalyzeStyle = {
     ...aiResultHeaderBaseStyle,
-    background: isDark
-      ? "linear-gradient(135deg, rgba(154,144,168,0.30) 0%, rgba(255,255,255,0.05) 70%)"
-      : "linear-gradient(135deg, rgba(160,150,190,0.14) 0%, rgba(183,157,138,0.08) 50%, rgba(255,255,255,0.35) 100%)",
+    background: isMobile
+      ? isDark
+        ? "linear-gradient(135deg, rgba(154,144,168,0.30) 0%, rgba(255,255,255,0.05) 70%)"
+        : "linear-gradient(135deg, rgba(160,150,190,0.14) 0%, rgba(183,157,138,0.08) 50%, rgba(255,255,255,0.35) 100%)"
+      : "transparent",
   };
 
   const aiResultHeaderTitleStyle = {
@@ -3443,7 +3373,7 @@ export default function Home() {
   };
 
   const aiResultContentStyle = {
-    padding: isMobile ? "12px 12px 14px 12px" : "16px 16px 18px 16px",
+    padding: isMobile ? "12px 12px 14px 12px" : "12px 0 14px 0",
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
@@ -3451,11 +3381,18 @@ export default function Home() {
   };
 
   const aiEmptyStateStyle = {
-    padding: "18px 14px",
-    borderRadius: "16px",
+    padding: isMobile ? "18px 14px" : "12px 0",
+    borderRadius: isMobile ? "16px" : "0",
     background: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.45)",
     border: isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid rgba(0,0,0,0.04)",
     boxShadow: isDark ? "none" : "0 6px 18px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.5)",
+    ...(!isMobile
+      ? {
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
+        }
+      : {}),
   };
 
   const aiEmptyTitleStyle = {
@@ -3483,20 +3420,20 @@ export default function Home() {
   };
 
   const aiFieldCardBaseStyle = {
-    borderRadius: "16px",
-    padding: isMobile ? "10px 10px 8px 10px" : "14px 14px 12px 14px",
-    background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.5)",
-    boxShadow: isDark ? "none" : "0 4px 12px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.45)",
+    borderRadius: isMobile ? "16px" : "12px",
+    padding: isMobile ? "10px 10px 8px 10px" : "14px 0 12px 0",
+    background: isMobile ? (isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.5)") : "transparent",
+    boxShadow: isMobile && !isDark ? "0 4px 12px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.45)" : "none",
+    border: isMobile ? `1px solid ${desktopGraphiteBorder}` : "none",
+    borderBottom: !isMobile ? `1px solid ${desktopGraphiteBorder}` : undefined,
   };
 
   const aiFieldCardGenerateStyle = {
     ...aiFieldCardBaseStyle,
-    border: isDark ? "1px solid rgba(183,157,138,0.22)" : "1px solid rgba(183,157,138,0.20)",
   };
 
   const aiFieldCardAnalyzeStyle = {
     ...aiFieldCardBaseStyle,
-    border: isDark ? "1px solid rgba(154,144,168,0.22)" : "1px solid rgba(154,144,168,0.20)",
   };
 
   const aiFieldLabelStyle = {
@@ -3532,15 +3469,35 @@ export default function Home() {
 
   const aiChipGenerateStyle = {
     ...aiChipStyleBase,
-    borderColor: isDark ? "rgba(183,157,138,0.35)" : "rgba(183,157,138,0.32)",
-    background: isDark ? "rgba(183,157,138,0.10)" : "rgba(183,157,138,0.12)",
+    borderColor: isMobile
+      ? isDark
+        ? "rgba(183,157,138,0.35)"
+        : "rgba(183,157,138,0.32)"
+      : desktopGraphiteBorder,
+    background: isMobile
+      ? isDark
+        ? "rgba(183,157,138,0.10)"
+        : "rgba(183,157,138,0.12)"
+      : isDark
+        ? "rgba(255,255,255,0.04)"
+        : "rgba(255,255,255,0.45)",
     color: isDark ? "rgba(243,238,231,0.86)" : "rgba(43,43,43,0.88)",
   };
 
   const aiChipAnalyzeStyle = {
     ...aiChipStyleBase,
-    borderColor: isDark ? "rgba(154,144,168,0.35)" : "rgba(160,150,190,0.22)",
-    background: isDark ? "rgba(154,144,168,0.10)" : "rgba(160,150,190,0.10)",
+    borderColor: isMobile
+      ? isDark
+        ? "rgba(154,144,168,0.35)"
+        : "rgba(160,150,190,0.22)"
+      : desktopGraphiteBorder,
+    background: isMobile
+      ? isDark
+        ? "rgba(154,144,168,0.10)"
+        : "rgba(160,150,190,0.10)"
+      : isDark
+        ? "rgba(255,255,255,0.04)"
+        : "rgba(255,255,255,0.45)",
     color: isDark ? "rgba(243,238,231,0.86)" : "rgba(43,43,43,0.88)",
   };
 
@@ -3664,19 +3621,13 @@ export default function Home() {
   const analyzeResultModuleStyle = {
     ...aiResultModuleStyle,
     marginTop: workspaceNarrow ? "8px" : "12px",
-    borderRadius: isMobile ? "12px" : "16px",
+    borderRadius: isMobile ? "12px" : "0",
     border: isMobile
       ? isDark
         ? "1px solid rgba(255,255,255,0.06)"
         : "1px solid rgba(0,0,0,0.06)"
-      : isDark
-        ? "1px solid rgba(255,255,255,0.07)"
-        : "1px solid rgba(0,0,0,0.03)",
-    boxShadow: isMobile
-      ? "none"
-      : isDark
-        ? "none"
-        : "0 4px 16px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.48)",
+      : "none",
+    boxShadow: "none",
   };
 
   const uploadZoneStyle = analyzeUploadZoneEmptyStyle;
@@ -5447,86 +5398,19 @@ export default function Home() {
           </aside>
 
           <div className="osa-workspace-center" style={workspaceCenterColumnStyle}>
-            <div className="osa-workspace-panel" style={panelStyle}>
-        {!activeProjectKey ? (
-        <div className="osa-hero-section" style={heroSectionStyle}>
-          <div style={heroLogoAnchorStyle}>
-            <div style={heroLogoGlowOrbStyle} aria-hidden />
-            <div style={heroLogoInnerWrapStyle}>
-              <img
-                src="/logo.png"
-                alt="OSA"
-                style={{
-                  width: isMobile ? "clamp(52px, 15vw, 68px)" : workspaceNarrow ? "clamp(72px, 22vw, 90px)" : "clamp(96px, 11vw, 130px)",
-                  height: "auto",
-                  position: "relative",
-                  zIndex: 2,
-                  opacity: visible ? 0.98 : 0,
-                  transform: visible ? "scale(1)" : "scale(0.94)",
-                  transition: "opacity 1s ease, transform 1.1s ease",
-                  display: "block",
-                  boxShadow: isDark
-                    ? "0 0 80px rgba(183,157,138,0.35), 0 0 160px rgba(183,157,138,0.15)"
-                    : "0 0 80px rgba(183,157,138,0.25), 0 0 120px rgba(160,150,190,0.12)",
-                  filter: isDark
-                    ? "drop-shadow(0 12px 28px rgba(0,0,0,0.55))"
-                    : "drop-shadow(0 10px 22px rgba(43,43,43,0.12))",
-                }}
-              />
-            </div>
-            <div style={heroBadgeStyle}>
-              <span>Interior platform</span>
-              <span aria-hidden="true">•</span>
-              <span>{isDark ? "Graphite poetry" : "Silver mist"}</span>
-            </div>
-          </div>
-          <h1 className="osa-hero-title" style={titleStyle}>
-            Платформа, где интерьер{" "}
-            <br />
-            становится системой
-          </h1>
+            <div id="osa-workspace-anchor" className="osa-workspace-canvas" style={workspaceCanvasStyle}>
+        <PlatformHeroBanner
+          isDark={isDark}
+          isMobile={isMobile}
+          visible={visible}
+          compact={Boolean(activeProjectKey)}
+          integrated={!isMobile}
+          workspaceNarrow={workspaceNarrow}
+          lightAmbientHeroOverlay={lightAmbientHeroOverlay}
+          onSetTheme={(nextTheme) => setTheme(nextTheme === "dark" ? "dark" : "light")}
+        />
 
-          <p className="osa-hero-subtitle" style={textStyle}>
-            OSA помогает дизайнеру быстрее перейти от визуального образа к реальным решениям:
-            материалам, брендам, подбору, логике проекта и будущей смете — в одном ясном пространстве.
-          </p>
-
-        <div
-          className="osa-hero-cta-row"
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: isMobile ? "12px" : "18px",
-            flexDirection: isMobile ? "column" : "row",
-            alignItems: isMobile ? "stretch" : "center",
-            flexWrap: isMobile ? "nowrap" : "wrap",
-            marginBottom: "8px",
-            position: "relative",
-            zIndex: 1,
-          }}
-        >
-          <button
-            type="button"
-            style={{ ...heroCtaPrimaryStyle, boxShadow: heroCtaPrimaryShadowDefault }}
-            onClick={() => setTheme(isDark ? "light" : "dark")}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-3px) scale(1.04)";
-              e.currentTarget.style.boxShadow = heroCtaPrimaryShadowHover;
-              if (!isDark) e.currentTarget.style.filter = "brightness(1.05)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0px) scale(1)";
-              e.currentTarget.style.boxShadow = heroCtaPrimaryShadowDefault;
-              e.currentTarget.style.filter = "";
-            }}
-          >
-            {isDark ? "Светлая" : "Тёмная"}
-          </button>
-        </div>
-        </div>
-        ) : null}
-
-        <div id="osa-workspace-anchor" className="osa-workspace-card" style={workspaceCardStyle}>
+        <div className="osa-workspace-body" style={workspaceBodyStyle}>
           <div className="osa-mode-tabs" style={workspaceModeTabsStickyStyle} role="tablist" aria-label="Режимы работы">
             <button
               type="button"
@@ -7212,14 +7096,14 @@ export default function Home() {
                       revealStyle={generateRevealStyle(isAnalyzeResultVisible)}
                       budgetDraft={activeBudgetDraft}
                       onCreateBudgetDraft={handleCreateBudgetDraft}
-                      onPrepareGenerationPackage={handlePrepareGenerationPackage}
-                      sourceImageId={selectedImageId}
-                      sourceImageBase64={selectedImageBase64}
-                      onControlledRegenerate={handleControlledRegenerate}
-                      isControlledRegenerating={isControlledRegenerating}
-                      controlledRegenerationError={controlledRegenerationError}
-                      controlledRegenerationResult={controlledRegenerationResult}
-                      onAnalyzeControlledVisual={handleAnalyzeControlledVisual}
+                      onConceptIntentSubmit={handleConceptIntentUpdate}
+                      isConceptIntentProcessing={isControlledRegenerating}
+                      conceptIntentError={controlledRegenerationError}
+                      conceptIntentSuccess={
+                        controlledRegenerationResult?.visualId ? "Новая версия концепции готова." : ""
+                      }
+                      conceptIntentResultVisualId={controlledRegenerationResult?.visualId || ""}
+                      onAnalyzeConceptResult={handleAnalyzeControlledVisual}
                       showVisualProductDiscovery={showVisualProductDiscovery}
                       visualProductCandidates={visualProductCandidates}
                       visualProductCandidatesLoading={visualProductCandidatesLoading}
@@ -7308,8 +7192,8 @@ export default function Home() {
           </div>
         </div>
         ) : null}
-      </div>
-          </div>
+        </div>
+            </div>
 
           <aside
             className="osa-workspace-sidebar-right"
