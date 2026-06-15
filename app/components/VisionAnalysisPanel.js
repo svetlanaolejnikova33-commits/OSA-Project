@@ -9,6 +9,7 @@ import { SupplierMatchesSection } from "./SupplierMatchesSection";
 import { VisualProductDiscoverySection } from "./VisualProductDiscoverySection";
 import { BudgetRecommendationsSection } from "./BudgetRecommendationsSection";
 import { ProjectSelectionSection } from "./ProjectSelectionSection";
+import { StructuredEstimateSection } from "./StructuredEstimateSection";
 import { sumPreviewBudgetRows } from "../lib/registry/buildPreviewBudgetRows";
 import {
   ANALYSIS_MODE_LABELS_RU,
@@ -991,6 +992,7 @@ export function VisionAnalysisPanel({
   selectedProjectItems = [],
   onAddToProjectSelection,
   onProjectSelectionStatusChange,
+  activeProjectKey = "",
 }) {
   if (!semanticDraft) return null;
 
@@ -1044,6 +1046,12 @@ export function VisionAnalysisPanel({
           isDark={isDark}
           isMobile={isMobile}
           onStatusChange={onProjectSelectionStatusChange}
+        />
+        <StructuredEstimateSection
+          selectedProjectItems={selectedProjectItems}
+          projectKey={activeProjectKey}
+          isDark={isDark}
+          isMobile={isMobile}
         />
       </div>
     );

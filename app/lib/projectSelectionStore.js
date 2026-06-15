@@ -89,6 +89,7 @@ export function buildProjectSelectionItemFromBudgetRow(row, { status = PROJECT_S
     brand,
     model,
     title,
+    article: model,
     price: Number.isFinite(price) ? price : 0,
     image: row?.imageUrl || null,
     sourceUrl,
@@ -167,4 +168,53 @@ export function groupProjectSelectionByCategory(items) {
     map.get(category).push(item);
   }
   return map;
+}
+
+export function getProjectSelectionSummary(items) {
+  const list = asArray(items);
+  const selectedCount = list.filter((item) => item && item.status !== PROJECT_SELECTION_STATUS.EXCLUDED).length;
+  const budgetCount = list.filter((item) => item && item.status === PROJECT_SELECTION_STATUS.BUDGET).length;
+  const budgetTotal = sumBudgetSelectionItems(list);
+  return { selectedCount, budgetCount, budgetTotal };
+}
+
+/**
+ * Derived estimate rows for items marked «В смете» — export-ready shape, not persisted separately.
+ */
+export function buildStructuredEstimateRows(selectedProjectItems, projectKey = "") {
+  const pk = normalizeProjectKey(projectKey);
+  return asArray(selectedProjectItems)
+    .filter((item) => item && item.status === PROJECT_SELECTION_STATUS.BUDGET)
+    .map((item) => {
+      const quantity = 1;
+      const unit = "шт.";
+      const price = Number(item.price);
+      const safePrice = Number.isFinite(price) ? price : 0;
+      return {
+        id: item.id,
+        projectKey: pk || normalizeProjectKey(item.projectKey),
+        category: normalizeText(item.category) || "Прочее",
+        brand: normalizeText(item.brand) || "—",
+        model: normalizeText(item.model) || "",
+        title: normalizeText(item.title) || normalizeText(item.model) || "—",
+        article: normalizeText(item.article) || normalizeText(item.model) || "",
+        price: safePrice,
+        quantity,
+        unit,
+        total: safePrice * quantity,
+        sourceUrl: item.sourceUrl || "",
+        image: item.image || null,
+        matchPercent: Number.isFinite(item.matchPercent) ? item.matchPercent : null,
+        status: item.status,
+        addedAt: item.addedAt || "",
+        updatedAt: item.updatedAt || item.addedAt || "",
+      };
+    });
+}
+
+export function sumStructuredEstimateRows(rows) {
+  return asArray(rows).reduce((sum, row) => {
+    const total = Number(row?.total);
+    return sum + (Number.isFinite(total) ? total : 0);
+  }, 0);
 }

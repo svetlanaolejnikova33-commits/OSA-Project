@@ -14,7 +14,7 @@ function formatPrice(value) {
   return `≈ ${num.toLocaleString("ru-RU")} ₽`;
 }
 
-const THUMB_SIZE = 72;
+const THUMB_SIZE = 52;
 
 function thumbFrameStyle(isDark) {
   return {
@@ -55,33 +55,34 @@ function sectionLabelStyle(isDark) {
 
 function cardShellStyle(isDark, isMobile) {
   return {
-    padding: isMobile ? "10px 0" : "12px",
-    borderRadius: isMobile ? 0 : "14px",
-    border: isMobile ? "none" : isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)",
-    borderBottom: isMobile ? (isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)") : undefined,
-    background: isMobile ? "transparent" : isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.45)",
+    padding: isMobile ? "8px 0" : "8px 10px",
+    borderRadius: isMobile ? 0 : "12px",
+    border: isMobile ? "none" : isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid rgba(0,0,0,0.05)",
+    borderBottom: isMobile ? (isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid rgba(0,0,0,0.05)") : undefined,
+    background: isMobile ? "transparent" : isDark ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.38)",
   };
 }
 
 function addButtonStyle(isDark, selected) {
   return {
-    marginTop: "10px",
-    padding: "8px 12px",
+    padding: "4px 10px",
     borderRadius: "999px",
-    fontSize: "12px",
+    fontSize: "11px",
     fontWeight: 600,
     cursor: selected ? "default" : "pointer",
     font: "inherit",
-    border: isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(0,0,0,0.08)",
+    lineHeight: 1.2,
+    border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
     background: selected
       ? isDark
-        ? "rgba(183,157,138,0.22)"
-        : "rgba(183,157,138,0.18)"
+        ? "rgba(183,157,138,0.2)"
+        : "rgba(183,157,138,0.16)"
       : isDark
-        ? "rgba(255,255,255,0.06)"
-        : "rgba(255,255,255,0.85)",
-    color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)",
+        ? "rgba(255,255,255,0.05)"
+        : "rgba(255,255,255,0.82)",
+    color: isDark ? "rgba(243,238,231,0.88)" : "rgba(43,43,43,0.88)",
     opacity: selected ? 0.95 : 1,
+    whiteSpace: "nowrap",
   };
 }
 
@@ -142,66 +143,70 @@ function SkuProductCard({
 
   return (
     <div style={cardShellStyle(isDark, isMobile)}>
-      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
         <ProductThumb imageUrl={row.imageUrl} alt={row.productName || row.article || "Товар"} isDark={isDark} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: "14px",
+              fontSize: "13px",
               fontWeight: 600,
-              lineHeight: 1.35,
-              color: isDark ? "rgba(243,238,231,0.92)" : "rgba(43,43,43,0.92)",
+              lineHeight: 1.3,
+              color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)",
             }}
           >
             {row.brand || "—"}
+            {row.productName || row.article ? (
+              <span style={{ fontWeight: 500, color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.82)" }}>
+                {" "}
+                / {row.productName || row.article}
+              </span>
+            ) : null}
           </div>
           <div
             style={{
               marginTop: "4px",
-              fontSize: "13px",
-              lineHeight: 1.45,
-              color: isDark ? "rgba(243,238,231,0.78)" : "rgba(110,106,102,0.9)",
-            }}
-          >
-            {row.productName || row.article || "—"}
-          </div>
-          <div
-            style={{
-              marginTop: "6px",
               display: "flex",
               flexWrap: "wrap",
-              gap: "8px 12px",
+              gap: "6px 10px",
               alignItems: "center",
-              fontSize: "13px",
-              lineHeight: 1.4,
+              fontSize: "12px",
+              lineHeight: 1.35,
             }}
           >
-            <span style={{ fontWeight: 600, color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)" }}>
+            <span style={{ fontWeight: 600, color: isDark ? "rgba(243,238,231,0.88)" : "rgba(43,43,43,0.88)" }}>
               {formatPrice(row.unitPrice)}
             </span>
             {matchScore ? (
-              <span style={{ color: isDark ? "rgba(243,238,231,0.55)" : "rgba(110,106,102,0.75)", fontSize: "12px" }}>
-                {matchScore}% совпадение
+              <span style={{ color: isDark ? "rgba(243,238,231,0.5)" : "rgba(110,106,102,0.68)", fontSize: "11px" }}>
+                {matchScore}%
               </span>
             ) : null}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center", marginTop: "8px" }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "8px",
+              alignItems: "center",
+              marginTop: "6px",
+            }}
+          >
             {sourceUrl || searchUrl ? (
               <a href={sourceUrl || searchUrl} target="_blank" rel="noreferrer" style={linkStyle(isDark)}>
                 Открыть источник
               </a>
             ) : null}
+            {!compact && onAddToProjectSelection ? (
+              <button
+                type="button"
+                disabled={isInSelection}
+                onClick={() => onAddToProjectSelection(row)}
+                style={addButtonStyle(isDark, isInSelection)}
+              >
+                {isInSelection ? "В подборке ✓" : "Добавить в проект"}
+              </button>
+            ) : null}
           </div>
-          {!compact && onAddToProjectSelection ? (
-            <button
-              type="button"
-              disabled={isInSelection}
-              onClick={() => onAddToProjectSelection(row)}
-              style={addButtonStyle(isDark, isInSelection)}
-            >
-              {isInSelection ? "В подборке ✓" : "Добавить в проект"}
-            </button>
-          ) : null}
         </div>
       </div>
     </div>

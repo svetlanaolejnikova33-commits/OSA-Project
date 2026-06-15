@@ -5698,6 +5698,7 @@ export default function Home() {
               selectedProjectItems={selectedProjectItems}
               onAddToProjectSelection={handleAddToProjectSelection}
               onProjectSelectionStatusChange={handleProjectSelectionStatusChange}
+              activeProjectKey={activeProjectKey || stableSessionProjectKeyRef.current || ""}
             />
           ) : (
             <div style={{ opacity: 0.72 }}>Черновик сметы можно создать после анализа сцены.</div>
