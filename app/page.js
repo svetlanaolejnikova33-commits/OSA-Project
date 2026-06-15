@@ -27,6 +27,9 @@ import { AnalysisQualityCheckPanel } from "./components/AnalysisQualityCheckPane
 import { ProjectMemory } from "./components/project/ProjectMemory";
 import { ProjectSidebar } from "./components/project/ProjectSidebar";
 import { GenerateProjectContextPanel } from "./components/project/GenerateProjectContextPanel";
+import { WorkspacePipelineCards } from "./components/workspace/WorkspacePipelineCards";
+import { GenerateConceptCompact } from "./components/workspace/GenerateConceptCompact";
+import { GenerateConceptDetails } from "./components/workspace/GenerateConceptDetails";
 import {
   normalizeSemanticDraft,
   createSemanticDraftFromPrompt,
@@ -38,13 +41,14 @@ import {
   getAnalysisRecordById,
   getBudgetDraftForAnalysisRecord,
   readAnalysisRecordsForProject,
+  readBudgetDraftsForProject,
   relinkBudgetDraftsFromPending,
   upsertAnalysisRecord,
   upsertBudgetDraft,
 } from "./lib/analysisDocumentsStore";
 import { mapSpecToSupplierRegistry } from "./lib/mapSpecToSupplierRegistry";
 import { matchSpecGroupsToSuppliers } from "./lib/matchSpecGroupsToSuppliers";
-import { buildPreviewBudgetRowsFromSkuMatches } from "./lib/registry/buildPreviewBudgetRows";
+import { buildPreviewBudgetRowsFromSkuMatches, sumPreviewBudgetRows } from "./lib/registry/buildPreviewBudgetRows";
 import { enrichSkuMatchesWithProductMedia } from "./lib/registry/enrichSkuMatchesWithProductMedia";
 import { fetchSkuMatchesForBudgetDraft } from "./lib/registry/fetchSkuMatchesForBudgetDraft";
 import {
@@ -66,6 +70,12 @@ import {
 } from "./lib/generationPackageUtils";
 import { attachRelatedEditableObjectsToSpecGroups } from "./lib/editableObjectsUtils";
 import { attachRelatedSceneObjectsToSpecGroups } from "./lib/sceneGraphUtils";
+import {
+  addProjectSelectionItem,
+  buildProjectSelectionItemFromBudgetRow,
+  readProjectSelectionItems,
+  updateProjectSelectionItemStatus,
+} from "./lib/projectSelectionStore";
 import { useResponsiveLayout, rv } from "./lib/responsiveLayout";
 import {
   ensureStorageVersion,
@@ -127,6 +137,31 @@ const IT_TEXT_EDIT_MOCK = "text_edit_mock";
 const IT_IMAGE_EDIT = "image_edit";
 const IT_SKU_REPLACE_PENDING = "sku_replace_pending";
 const IT_CONTROLLED_REGENERATION = "controlled_regeneration";
+
+function resolveBudgetLinkageId(activeSavedAnalysisRecordId, selectedImageId) {
+  const saved = typeof activeSavedAnalysisRecordId === "string" ? activeSavedAnalysisRecordId.trim() : "";
+  if (saved) return saved;
+  const imageId = typeof selectedImageId === "string" ? selectedImageId.trim() : "";
+  if (!imageId) return "";
+  return `pending:${imageId}`;
+}
+
+function resolveActiveBudgetDraft(projectKey, activeSavedAnalysisRecordId, selectedImageId) {
+  const linkageId = resolveBudgetLinkageId(activeSavedAnalysisRecordId, selectedImageId);
+  if (linkageId) {
+    const linked = getBudgetDraftForAnalysisRecord(linkageId);
+    if (linked) return linked;
+  }
+  const pk = typeof projectKey === "string" ? projectKey.trim() : "";
+  if (!pk) return null;
+  const drafts = readBudgetDraftsForProject(pk);
+  if (!drafts.length) return null;
+  if (linkageId) {
+    const matched = drafts.find((row) => row && row.analysisRecordId === linkageId);
+    if (matched) return matched;
+  }
+  return drafts[0];
+}
 
 function migrateIterationTypeStored(raw) {
   if (!raw || typeof raw !== "string") return "";
@@ -1503,6 +1538,7 @@ export default function Home() {
   const [documentStoreVersion, setDocumentStoreVersion] = useState(0);
   const [analysisSaveFeedback, setAnalysisSaveFeedback] = useState(null);
   const [budgetDraftsVersion, setBudgetDraftsVersion] = useState(0);
+  const [projectSelectionVersion, setProjectSelectionVersion] = useState(0);
   const [registrySupplierSources, setRegistrySupplierSources] = useState(null);
   const [devAnalysisScenarioType, setDevAnalysisScenarioType] = useState("");
   const [isAnalyzeDropActive, setIsAnalyzeDropActive] = useState(false);
@@ -1540,6 +1576,7 @@ export default function Home() {
   const lastPersistedEnvelopeSigRef = useRef("");
   const lightAmbientSampleKeyRef = useRef("");
   const registryBudgetHydratedRef = useRef(false);
+  const budgetDraftAutoCreateAttemptedRef = useRef("");
   const lastProjectGalleryHydrateSigRef = useRef("");
   const activeProjectMetaRef = useRef(null);
   const semanticDraftRef = useRef(null);
@@ -2403,7 +2440,8 @@ export default function Home() {
   };
 
   function buildBudgetDraftPayload(existingDraft, linkageId) {
-    if (!activeProjectKey || !semanticDraft?.specAnalysis || !linkageId) return null;
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey || !semanticDraft?.specAnalysis || !linkageId) return null;
     const groups = Array.isArray(semanticDraft.specAnalysis.specificationGroups)
       ? semanticDraft.specAnalysis.specificationGroups
       : [];
@@ -2431,7 +2469,7 @@ export default function Home() {
     );
     return {
       id: existingDraft?.id || newStableId(),
-      projectKey: activeProjectKey,
+      projectKey: projectKey,
       analysisRecordId: linkageId,
       createdAt: existingDraft?.createdAt || new Date().toISOString(),
       status: "draft",
@@ -2451,21 +2489,35 @@ export default function Home() {
   }
 
   const handleCreateBudgetDraft = async () => {
-    if (!activeProjectKey || !semanticDraft?.specAnalysis) return;
-    const linkageId =
-      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey || !semanticDraft?.specAnalysis) return;
+    const linkageId = resolveBudgetLinkageId(activeSavedAnalysisRecordId, selectedImageId);
     if (!linkageId) return;
-    const existing = getBudgetDraftForAnalysisRecord(linkageId);
-    const payload = buildBudgetDraftPayload(existing, linkageId);
-    if (!payload) return;
-    const skuMatches = await fetchSkuMatchesForBudgetDraft(payload);
-    const enrichedSkuMatches = await enrichSkuMatchesWithProductMedia(skuMatches);
-    payload.skuMatches = enrichedSkuMatches;
-    payload.previewBudgetRows = buildPreviewBudgetRowsFromSkuMatches(enrichedSkuMatches, {
-      budgetDraft: payload,
-    });
-    upsertBudgetDraft(payload);
-    setBudgetDraftsVersion((value) => value + 1);
+    try {
+      const existing = getBudgetDraftForAnalysisRecord(linkageId);
+      const payload = buildBudgetDraftPayload(existing, linkageId);
+      if (!payload) return;
+      const skuMatches = await fetchSkuMatchesForBudgetDraft(payload);
+      const enrichedSkuMatches = await enrichSkuMatchesWithProductMedia(skuMatches);
+      payload.skuMatches = enrichedSkuMatches;
+      payload.previewBudgetRows = buildPreviewBudgetRowsFromSkuMatches(enrichedSkuMatches, {
+        budgetDraft: payload,
+      });
+      upsertBudgetDraft(payload);
+      setBudgetDraftsVersion((value) => value + 1);
+    } catch (e) {
+      console.warn("OSA: budget draft create failed", e);
+      throw e;
+    }
+  };
+
+  const scheduleBudgetDraftCreate = () => {
+    budgetDraftAutoCreateAttemptedRef.current = "";
+    window.setTimeout(() => {
+      void handleCreateBudgetDraft().catch(() => {
+        budgetDraftAutoCreateAttemptedRef.current = "";
+      });
+    }, 0);
   };
 
   useEffect(() => {
@@ -2554,19 +2606,47 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (registryBudgetHydratedRef.current) return;
-    if (!registrySupplierSources?.length || !activeProjectKey || !semanticDraft?.specAnalysis) return;
-    const linkageId =
-      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
+    budgetDraftAutoCreateAttemptedRef.current = "";
+    registryBudgetHydratedRef.current = false;
+  }, [selectedImageId, activeSavedAnalysisRecordId]);
+
+  useEffect(() => {
+    if (!isAnalyzeMode || !semanticDraft?.specAnalysis) return;
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey) return;
+    const linkageId = resolveBudgetLinkageId(activeSavedAnalysisRecordId, selectedImageId);
     if (!linkageId) return;
-    const existing = getBudgetDraftForAnalysisRecord(linkageId);
-    if (!existing) return;
+
+    const existing = resolveActiveBudgetDraft(projectKey, activeSavedAnalysisRecordId, selectedImageId);
+    if (!existing) {
+      if (budgetDraftAutoCreateAttemptedRef.current === linkageId) return;
+      budgetDraftAutoCreateAttemptedRef.current = linkageId;
+      void handleCreateBudgetDraft()
+        .then(() => {
+          const created = getBudgetDraftForAnalysisRecord(linkageId);
+          if (!created) budgetDraftAutoCreateAttemptedRef.current = "";
+        })
+        .catch(() => {
+          budgetDraftAutoCreateAttemptedRef.current = "";
+        });
+      return;
+    }
+
+    if (registryBudgetHydratedRef.current) return;
+    if (!registrySupplierSources?.length) return;
     const payload = buildBudgetDraftPayload(existing, linkageId);
     if (!payload) return;
     registryBudgetHydratedRef.current = true;
     upsertBudgetDraft(payload);
     setBudgetDraftsVersion((value) => value + 1);
-  }, [registrySupplierSources, activeProjectKey, semanticDraft, activeSavedAnalysisRecordId, selectedImageId]);
+  }, [
+    isAnalyzeMode,
+    activeProjectKey,
+    semanticDraft,
+    activeSavedAnalysisRecordId,
+    selectedImageId,
+    registrySupplierSources,
+  ]);
 
   const showVisualProductDiscovery = useMemo(
     () => hasLightingPendantsCategory(semanticDraft),
@@ -3148,6 +3228,16 @@ export default function Home() {
     boxSizing: "border-box",
   };
 
+  /** Shared geometry for Create Interior + Analyze Image (mobile-first). */
+  const workspaceDesktopMaxWidth = "760px";
+  const workspaceContentMaxWidth = isMobile ? "100%" : workspaceDesktopMaxWidth;
+  const workspaceBodyPadding = isMobile ? "18px 14px" : "20px 22px 24px 22px";
+  const workspaceCanvasMargin = isMobile ? "10px auto 16px auto" : "8px auto 24px auto";
+  const workspaceCardRadius = isMobile ? "18px" : "20px";
+  const workspaceInnerCardRadius = "18px";
+  const workspaceSectionGap = isMobile ? "10px" : "12px";
+  const workspaceModeTabsMargin = isMobile ? "0 auto 20px auto" : "0 auto 24px auto";
+
   const sidePanelBaseStyle = useMemo(
     () => ({
       borderRadius: isMobile ? "18px" : "16px",
@@ -3208,7 +3298,7 @@ export default function Home() {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
+    alignItems: "stretch",
   };
 
   const contextPlaceholderCardStyle = {
@@ -3280,7 +3370,7 @@ export default function Home() {
     maxWidth: isMobile ? "100%" : undefined,
     height: isMobile ? "auto" : undefined,
     padding: isMobile ? "18px 18px" : "18px 20px",
-    borderRadius: "18px",
+    borderRadius: workspaceInnerCardRadius,
     boxSizing: "border-box",
     background: isDark
       ? "rgba(255,255,255,0.04)"
@@ -3317,9 +3407,9 @@ export default function Home() {
 
   const statsRowWrapperStyle = {
     width: "100%",
-    maxWidth: rv(isMobile, "760px", "100%"),
-    margin: "0 auto",
-    padding: isMobile ? 0 : "0 24px 24px 24px",
+    maxWidth: "100%",
+    margin: `${workspaceSectionGap} auto 0 auto`,
+    padding: 0,
     boxSizing: "border-box",
     display: isMobile ? "grid" : "flex",
     gridTemplateColumns: isMobile ? "1fr" : undefined,
@@ -3333,10 +3423,10 @@ export default function Home() {
   };
 
   const workspaceCanvasStyle = {
-    maxWidth: isMobile ? "100%" : isAnalyzeMode ? "min(1080px, 100%)" : "760px",
+    maxWidth: workspaceContentMaxWidth,
     width: "100%",
-    margin: isMobile ? "10px auto 16px auto" : "8px auto 24px auto",
-    borderRadius: isMobile ? "18px" : "20px",
+    margin: workspaceCanvasMargin,
+    borderRadius: workspaceCardRadius,
     padding: 0,
     overflow: "hidden",
     textAlign: "center",
@@ -3394,16 +3484,10 @@ export default function Home() {
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
-    padding: isMobile
-      ? isAnalyzeMode
-        ? "18px 14px"
-        : "18px 14px"
-      : isAnalyzeMode
-        ? "20px 22px 24px 22px"
-        : "22px 24px 26px 24px",
+    padding: workspaceBodyPadding,
     display: "flex",
     flexDirection: "column",
-    alignItems: rv(isMobile, isAnalyzeMode ? "center" : "stretch", "stretch"),
+    alignItems: "stretch",
   };
 
   const desktopGraphiteBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
@@ -3416,6 +3500,10 @@ export default function Home() {
     padding: 0,
     boxSizing: "border-box",
     alignSelf: "stretch",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: workspaceSectionGap,
   };
 
   const workspaceLabelStyle = {
@@ -3428,9 +3516,9 @@ export default function Home() {
   };
 
   const modeTabsWrapperStyle = {
-    maxWidth: rv(isMobile, "680px", "none"),
+    maxWidth: isMobile ? "100%" : "none",
     width: "100%",
-    margin: isMobile ? "0 auto 20px auto" : "0 auto 24px auto",
+    margin: workspaceModeTabsMargin,
     padding: isMobile ? "5px" : "5px",
     borderRadius: isMobile ? "16px" : "14px",
     position: "relative",
@@ -3455,9 +3543,7 @@ export default function Home() {
 
   const workspaceModeTabsStickyStyle = {
     ...modeTabsWrapperStyle,
-    maxWidth: isAnalyzeMode ? "100%" : modeTabsWrapperStyle.maxWidth,
-    margin: isAnalyzeMode ? "0 auto 20px auto" : "0 auto 32px auto",
-    ...(workspaceNarrow || isAnalyzeMode
+    ...(workspaceNarrow
       ? {}
       : {
           position: "sticky",
@@ -3572,10 +3658,10 @@ export default function Home() {
     ...primaryButton,
     display: "block",
     width: "100%",
-    maxWidth: isMobile ? "100%" : "320px",
+    maxWidth: "100%",
     minHeight: isMobile ? "44px" : undefined,
-    margin: "14px auto 0 auto",
-    alignSelf: "center",
+    margin: `${workspaceSectionGap} auto 0 auto`,
+    alignSelf: "stretch",
     boxSizing: "border-box",
     opacity: isRunning ? 0.75 : 1,
   };
@@ -3590,8 +3676,8 @@ export default function Home() {
     width: "100%",
     maxWidth: "100%",
     minWidth: 0,
-    marginTop: "18px",
-    borderRadius: isMobile ? "18px" : "14px",
+    marginTop: workspaceSectionGap,
+    borderRadius: workspaceInnerCardRadius,
     overflow: "hidden",
     boxSizing: "border-box",
     alignSelf: "stretch",
@@ -3625,21 +3711,12 @@ export default function Home() {
         : "1px solid rgba(0,0,0,0.03)",
   };
 
-  const aiResultHeaderGenerateStyle = {
+  const workspaceSectionHeaderStyle = {
     ...aiResultHeaderBaseStyle,
     background: isMobile
       ? isDark
         ? "linear-gradient(135deg, rgba(183,157,138,0.30) 0%, rgba(255,255,255,0.05) 70%)"
         : "linear-gradient(135deg, rgba(183,157,138,0.20) 0%, rgba(160,150,190,0.08) 55%, rgba(255,255,255,0.35) 100%)"
-      : "transparent",
-  };
-
-  const aiResultHeaderAnalyzeStyle = {
-    ...aiResultHeaderBaseStyle,
-    background: isMobile
-      ? isDark
-        ? "linear-gradient(135deg, rgba(154,144,168,0.30) 0%, rgba(255,255,255,0.05) 70%)"
-        : "linear-gradient(135deg, rgba(160,150,190,0.14) 0%, rgba(183,157,138,0.08) 50%, rgba(255,255,255,0.35) 100%)"
       : "transparent",
   };
 
@@ -3655,7 +3732,7 @@ export default function Home() {
     marginTop: isMobile ? "6px" : "8px",
     fontSize: isMobile ? "14px" : "15px",
     lineHeight: "1.5",
-    textAlign: isMobile ? "left" : undefined,
+    textAlign: "left",
     color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.9)",
   };
 
@@ -3664,7 +3741,7 @@ export default function Home() {
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
-    textAlign: isMobile ? "left" : undefined,
+    textAlign: "left",
   };
 
   const aiEmptyStateStyle = {
@@ -3826,21 +3903,12 @@ export default function Home() {
     marginBottom: "8px",
   };
 
-  const analyzeStageStyle = {
-    width: "100%",
-    maxWidth: "100%",
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
-    gap: isMobile ? "10px" : workspaceNarrow ? "12px" : "16px",
-    alignSelf: "stretch",
-  };
+  const analyzeStageStyle = workspaceGeneratePromptBlockStyle;
 
   const analyzePreviewFrameStyle = {
     width: "100%",
     margin: "0 auto",
-    borderRadius: "16px",
+    borderRadius: workspaceInnerCardRadius,
     border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.04)",
     background: isDark ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.55)",
     overflow: "hidden",
@@ -3850,12 +3918,12 @@ export default function Home() {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: isMobile ? "min(36vh, 280px)" : workspaceNarrow ? "min(42vh, 360px)" : "min(48vh, 420px)",
+    minHeight: isMobile ? "min(36vh, 280px)" : "min(42vh, 360px)",
   };
 
   const analyzePreviewImageStyle = {
     width: "100%",
-    maxHeight: isMobile ? "min(48vh, 420px)" : workspaceNarrow ? "min(56vh, 520px)" : "min(72vh, 760px)",
+    maxHeight: isMobile ? "min(48vh, 420px)" : "min(56vh, 520px)",
     height: "auto",
     display: "block",
     objectFit: "contain",
@@ -3864,7 +3932,7 @@ export default function Home() {
 
   const analyzeUploadZoneBaseStyle = {
     width: "100%",
-    borderRadius: "16px",
+    borderRadius: workspaceInnerCardRadius,
     transition: "all 0.3s ease",
     cursor: "pointer",
     boxSizing: "border-box",
@@ -3872,7 +3940,7 @@ export default function Home() {
 
   const analyzeUploadZoneEmptyStyle = {
     ...analyzeUploadZoneBaseStyle,
-    padding: workspaceNarrow ? "18px 14px" : "20px 16px",
+    padding: isMobile ? "18px 14px" : "20px 16px",
     minHeight: "160px",
     border: isDark ? "1px dashed rgba(255,255,255,0.18)" : "1px dashed rgba(0,0,0,0.1)",
     background: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.45)",
@@ -3886,7 +3954,7 @@ export default function Home() {
 
   const analyzeUploadZoneWithImageStyle = {
     ...analyzeUploadZoneBaseStyle,
-    padding: workspaceNarrow ? "8px 8px 12px" : "10px 10px 14px",
+    padding: isMobile ? "8px 8px 12px" : "10px 10px 14px",
     minHeight: "auto",
     border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.05)",
     background: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.42)",
@@ -3900,22 +3968,12 @@ export default function Home() {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    alignItems: isMobile ? "stretch" : "center",
-    gap: "10px",
-    marginTop: workspaceNarrow ? "2px" : "4px",
+    alignItems: "stretch",
+    gap: workspaceSectionGap,
+    marginTop: workspaceSectionGap,
   };
 
-  const analyzeResultModuleStyle = {
-    ...aiResultModuleStyle,
-    marginTop: workspaceNarrow ? "8px" : "12px",
-    borderRadius: isMobile ? "12px" : "0",
-    border: isMobile
-      ? isDark
-        ? "1px solid rgba(255,255,255,0.06)"
-        : "1px solid rgba(0,0,0,0.06)"
-      : "none",
-    boxShadow: "none",
-  };
+  const workspaceResultModuleStyle = aiResultModuleStyle;
 
   const uploadZoneStyle = analyzeUploadZoneEmptyStyle;
 
@@ -3939,8 +3997,8 @@ export default function Home() {
   const imageModuleStyle = {
     width: "100%",
     maxWidth: "100%",
-    marginTop: "14px",
-    borderRadius: "18px",
+    marginTop: workspaceSectionGap,
+    borderRadius: workspaceInnerCardRadius,
     overflow: "hidden",
     boxSizing: "border-box",
     ...(workspaceProjectPalette
@@ -4045,7 +4103,7 @@ export default function Home() {
     gap: "10px",
     justifyContent: "center",
     alignItems: "stretch",
-    marginTop: "16px",
+    marginTop: workspaceSectionGap,
     width: "100%",
     boxSizing: "border-box",
   };
@@ -5213,6 +5271,7 @@ export default function Home() {
     setAnalyzeSceneError("");
     setDemoFallbackNotice(DEMO_FALLBACK_WARNING_RU);
     window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+    scheduleBudgetDraftCreate();
     createDraftDirtyRef.current = true;
     window.setTimeout(() => persistWorkspaceSessionNowRef.current(), 0);
     return nextDraft;
@@ -5300,10 +5359,11 @@ export default function Home() {
       });
       setActiveSavedAnalysisRecordId("");
       setSavedDocumentSnapshot("");
-      setSemanticDraft(nextDraft);
-      setResultAnalysisMode(selectedAnalysisMode);
-      setDemoFallbackNotice("");
-      window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+    setSemanticDraft(nextDraft);
+    setResultAnalysisMode(selectedAnalysisMode);
+    setDemoFallbackNotice("");
+    window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
+    scheduleBudgetDraftCreate();
 
       if (isIndexedDbAvailable()) {
         if (selectedImageBase64) {
@@ -5384,12 +5444,32 @@ export default function Home() {
           : "";
 
   const activeBudgetDraft = useMemo(() => {
-    if (!activeProjectKey) return null;
-    const linkageId =
-      activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
-    if (!linkageId) return null;
-    return getBudgetDraftForAnalysisRecord(linkageId);
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey) return null;
+    return resolveActiveBudgetDraft(projectKey, activeSavedAnalysisRecordId, selectedImageId);
   }, [activeProjectKey, activeSavedAnalysisRecordId, selectedImageId, budgetDraftsVersion]);
+
+  const selectedProjectItems = useMemo(() => {
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey) return [];
+    return readProjectSelectionItems(projectKey);
+  }, [activeProjectKey, projectSelectionVersion]);
+
+  const handleAddToProjectSelection = (row) => {
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey || !row) return;
+    const item = buildProjectSelectionItemFromBudgetRow(row);
+    if (!item) return;
+    addProjectSelectionItem(projectKey, item);
+    setProjectSelectionVersion((value) => value + 1);
+  };
+
+  const handleProjectSelectionStatusChange = (itemId, status) => {
+    const projectKey = activeProjectKey || stableSessionProjectKeyRef.current;
+    if (!projectKey || !itemId || !status) return;
+    updateProjectSelectionItemStatus(projectKey, itemId, status);
+    setProjectSelectionVersion((value) => value + 1);
+  };
 
   persistWorkspaceSessionNowRef.current = () => {
     if (!hasRestoredWorkspaceSession) return;
@@ -5506,6 +5586,215 @@ export default function Home() {
       window.setTimeout(() => setImageError(""), 4200);
     }
   };
+
+  const workspacePipelineCards = useMemo(() => {
+    if (isAnalyzeMode) {
+      const aiPreview = semanticDraft
+        ? `Разбор: ${ANALYSIS_MODE_LABELS_RU[panelAnalysisMode] || panelAnalysisMode}`
+        : "Семантический разбор сцены и концепции";
+      const bimPreview = semanticDraft?.sceneGraph
+        ? "Структура сцены и редактируемые элементы"
+        : "Основа для точных итераций, спецификаций и связок";
+      const budgetCategoryCount =
+        activeBudgetDraft?.normalizedSpecGroups?.length ||
+        semanticDraft?.specAnalysis?.productCategories?.length ||
+        0;
+      const budgetBrandCount = (() => {
+        const names = new Set();
+        for (const entry of Array.isArray(activeBudgetDraft?.normalizedSpecGroups)
+          ? activeBudgetDraft.normalizedSpecGroups
+          : []) {
+          for (const brand of Array.isArray(entry?.supplierCandidates?.matchedBrands)
+            ? entry.supplierCandidates.matchedBrands
+            : []) {
+            const name = typeof brand?.brandName === "string" ? brand.brandName.trim() : "";
+            if (name) names.add(name);
+          }
+        }
+        return names.size;
+      })();
+      const budgetTotal = activeBudgetDraft
+        ? sumPreviewBudgetRows(activeBudgetDraft.previewBudgetRows)
+        : 0;
+      const formatBudgetPreviewPrice = (value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num) || num <= 0) return "";
+        return `≈ ${num.toLocaleString("ru-RU")} ₽`;
+      };
+      const budgetPreviewSublineParts = [];
+      if (budgetCategoryCount > 0) {
+        budgetPreviewSublineParts.push(
+          `${budgetCategoryCount} ${
+            budgetCategoryCount === 1 ? "категория" : budgetCategoryCount < 5 ? "категории" : "категорий"
+          }`
+        );
+      }
+      if (budgetBrandCount > 0) {
+        budgetPreviewSublineParts.push(
+          `${budgetBrandCount} ${budgetBrandCount === 1 ? "бренд" : budgetBrandCount < 5 ? "бренда" : "брендов"}`
+        );
+      }
+      const budgetPriceLabel = formatBudgetPreviewPrice(budgetTotal);
+      if (budgetPriceLabel) budgetPreviewSublineParts.push(budgetPriceLabel);
+      const budgetPreview = activeBudgetDraft
+        ? "Черновик готов"
+        : semanticDraft?.specAnalysis
+          ? "Черновик сметы ещё не создан"
+          : "Ожидает анализа";
+      const budgetPreviewSubline =
+        activeBudgetDraft && budgetPreviewSublineParts.length ? budgetPreviewSublineParts.join(" • ") : "";
+
+      return [
+        {
+          id: "ai",
+          title: "AI",
+          preview: aiPreview,
+          detail: semanticDraft ? (
+            <VisionAnalysisPanel
+              semanticDraft={semanticDraft}
+              activeMode={panelAnalysisMode}
+              isDark={isDark}
+              isMobile={isMobile}
+              revealStyle={generateRevealStyle(isAnalyzeResultVisible)}
+              budgetDraft={activeBudgetDraft}
+              onCreateBudgetDraft={handleCreateBudgetDraft}
+              placement="pipeline"
+            />
+          ) : (
+            <div style={{ opacity: 0.72 }}>Загрузите изображение и запустите анализ.</div>
+          ),
+        },
+        {
+          id: "bim",
+          title: "BIM",
+          preview: bimPreview,
+          detail: semanticDraft ? (
+            <VisionAnalysisPanel
+              semanticDraft={semanticDraft}
+              activeMode={panelAnalysisMode}
+              isDark={isDark}
+              isMobile={isMobile}
+              placement="bim"
+            />
+          ) : (
+            <div style={{ opacity: 0.72 }}>Структура сцены появится после анализа.</div>
+          ),
+        },
+        {
+          id: "budget",
+          title: "Смета",
+          preview: budgetPreview,
+          previewSubline: budgetPreviewSubline,
+          defaultExpanded: false,
+          detail: semanticDraft ? (
+            <VisionAnalysisPanel
+              semanticDraft={semanticDraft}
+              activeMode="spec"
+              isDark={isDark}
+              isMobile={isMobile}
+              budgetDraft={activeBudgetDraft}
+              onCreateBudgetDraft={handleCreateBudgetDraft}
+              placement="budget"
+              selectedProjectItems={selectedProjectItems}
+              onAddToProjectSelection={handleAddToProjectSelection}
+              onProjectSelectionStatusChange={handleProjectSelectionStatusChange}
+            />
+          ) : (
+            <div style={{ opacity: 0.72 }}>Черновик сметы можно создать после анализа сцены.</div>
+          ),
+        },
+      ];
+    }
+
+    const aiPreview = resultData
+      ? resultData.title || "Концепция готова"
+      : "Анализ визуального решения и переход к подбору";
+    const bimPreview = resultData?.concept?.planning
+      ? "Структурированная концепция для итераций"
+      : "Основа для точных итераций, спецификаций и связок";
+    const budgetPreview = "Подготовка к смете и согласованию проекта с клиентом";
+
+    return [
+      {
+        id: "ai",
+        title: "AI",
+        preview: aiPreview,
+        detail: (
+          <GenerateConceptDetails
+            resultData={resultData}
+            isDark={isDark}
+            isMobile={isMobile}
+            isGenerateResultVisible={isGenerateResultVisible}
+            aiFieldsGridStyle={aiFieldsGridStyle}
+            aiFieldCardGenerateStyle={aiFieldCardGenerateStyle}
+            aiFieldLabelStyle={aiFieldLabelStyle}
+            aiFieldValueStyle={aiFieldValueStyle}
+            aiChipGenerateStyle={aiChipGenerateStyle}
+            aiChipsContainerStyle={aiChipsContainerStyle}
+            conceptSectionsGridStyle={conceptSectionsGridStyle}
+            conceptSectionCardStyle={conceptSectionCardStyle}
+            conceptSectionTitleStyle={conceptSectionTitleStyle}
+            generateRevealStyle={generateRevealStyle}
+          />
+        ),
+      },
+      {
+        id: "bim",
+        title: "BIM",
+        preview: bimPreview,
+        detail: resultData ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {[
+              ["Планировка", resultData.concept?.planning],
+              ["Свет", resultData.concept?.lighting],
+              ["Материалы", resultData.concept?.materials],
+              ["Акценты", resultData.concept?.accents],
+              ["Хранение", resultData.concept?.storage],
+            ].map(([label, value]) =>
+              value ? (
+                <div key={label}>
+                  <div style={{ ...aiFieldLabelStyle, marginBottom: "4px" }}>{label}</div>
+                  <div style={aiFieldValueStyle}>{value}</div>
+                </div>
+              ) : null
+            )}
+          </div>
+        ) : (
+          <div style={{ opacity: 0.72 }}>Структура концепции появится после генерации.</div>
+        ),
+      },
+      {
+        id: "budget",
+        title: "Смета",
+        preview: budgetPreview,
+        detail: (
+          <div style={{ opacity: 0.72, lineHeight: 1.55 }}>
+            Скоро: ориентировочная смета по проекту и согласование с клиентом.
+          </div>
+        ),
+      },
+    ];
+  }, [
+    isAnalyzeMode,
+    semanticDraft,
+    panelAnalysisMode,
+    isDark,
+    isMobile,
+    isAnalyzeResultVisible,
+    activeBudgetDraft,
+    selectedProjectItems,
+    resultData,
+    isGenerateResultVisible,
+    aiFieldsGridStyle,
+    aiFieldCardGenerateStyle,
+    aiFieldLabelStyle,
+    aiFieldValueStyle,
+    aiChipGenerateStyle,
+    aiChipsContainerStyle,
+    conceptSectionsGridStyle,
+    conceptSectionCardStyle,
+    conceptSectionTitleStyle,
+  ]);
 
   return (
     <main className="osa-main" style={mainStyle}>
@@ -5813,155 +6102,23 @@ export default function Home() {
                 {isGenerateLoading ? "Генерируем концепцию..." : "Сгенерировать"}
               </button>
 
-              <div style={aiResultModuleStyle}>
-                <div style={aiResultHeaderGenerateStyle}>
-                  <div style={aiResultHeaderTitleStyle}>Конструктор концепции</div>
-                  <div style={aiResultHeaderSubtitleStyle}>
-                    {resultData
-                      ? "Концепция готова в структурированном виде"
-                      : isGenerateLoading
-                        ? "Генерируем концепцию..."
-                        : "Опишите интерьер и нажмите «Сгенерировать»"}
+              {resultData ? (
+                <GenerateConceptCompact resultData={resultData} isDark={isDark} isMobile={isMobile} />
+              ) : isGenerateLoading || generateError ? (
+                <div
+                  style={{
+                    ...aiEmptyStateStyle,
+                    marginTop: "12px",
+                    ...(isGenerateLoading
+                      ? generateRevealStyle(false)
+                      : { opacity: 1, transform: "translateY(0px)", transition: "none" }),
+                  }}
+                >
+                  <div style={aiEmptyTextStyle}>
+                    {generateError || "Генерируем концепцию..."}
                   </div>
                 </div>
-
-                <div style={aiResultContentStyle}>
-                  {resultData ? (
-                    <div
-                      className="osa-ai-fields-grid"
-                      style={{ ...aiFieldsGridStyle, ...generateRevealStyle(isGenerateResultVisible) }}
-                    >
-                      <div
-                        style={{
-                          ...aiFieldCardGenerateStyle,
-                          opacity: isGenerateResultVisible ? 1 : 0,
-                          transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "none",
-                          transitionDelay: "0ms",
-                        }}
-                      >
-                        <div style={aiFieldLabelStyle}>Название концепции</div>
-                        <div style={aiFieldValueStyle}>{resultData.title}</div>
-                      </div>
-
-                      <div
-                        style={{
-                          ...aiFieldCardGenerateStyle,
-                          opacity: isGenerateResultVisible ? 1 : 0,
-                          transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "none",
-                          transitionDelay: "70ms",
-                        }}
-                      >
-                        <div style={aiFieldLabelStyle}>Стиль</div>
-                        <div style={aiFieldValueStyle}>{resultData.style}</div>
-                      </div>
-
-                      <div
-                        style={{
-                          ...aiFieldCardGenerateStyle,
-                          opacity: isGenerateResultVisible ? 1 : 0,
-                          transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "none",
-                          transitionDelay: "140ms",
-                        }}
-                      >
-                        <div style={aiFieldLabelStyle}>Палитра</div>
-                        <div style={aiChipsContainerStyle}>
-                          <span style={aiChipGenerateStyle}>{resultData.palette.base}</span>
-                          <span style={aiChipGenerateStyle}>{resultData.palette.accent}</span>
-                          <span style={aiChipGenerateStyle}>{resultData.palette.contrast}</span>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          ...aiFieldCardGenerateStyle,
-                          opacity: isGenerateResultVisible ? 1 : 0,
-                          transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "none",
-                          transitionDelay: "210ms",
-                        }}
-                      >
-                        <div style={aiFieldLabelStyle}>Материалы</div>
-                        <div style={aiChipsContainerStyle}>
-                          {resultData.materials.map((m) => (
-                            <span key={m} style={aiChipGenerateStyle}>
-                              {m}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          ...aiFieldCardGenerateStyle,
-                          opacity: isGenerateResultVisible ? 1 : 0,
-                          transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "none",
-                          transitionDelay: "280ms",
-                        }}
-                      >
-                        <div style={aiFieldLabelStyle}>Настроение</div>
-                        <div style={aiFieldValueStyle}>{resultData.mood}</div>
-                      </div>
-
-                      <div
-                        style={{
-                          ...aiFieldCardGenerateStyle,
-                          gridColumn: "1 / -1",
-                          opacity: isGenerateResultVisible ? 1 : 0,
-                          transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "none",
-                          transitionDelay: "350ms",
-                        }}
-                      >
-                        <div style={aiFieldLabelStyle}>Концепция</div>
-                        <div className="osa-concept-grid" style={conceptSectionsGridStyle}>
-                          <div style={conceptSectionCardStyle}>
-                            <div style={conceptSectionTitleStyle}>Планировка</div>
-                            <div style={aiFieldValueStyle}>{resultData.concept.planning}</div>
-                          </div>
-                          <div style={conceptSectionCardStyle}>
-                            <div style={conceptSectionTitleStyle}>Свет</div>
-                            <div style={aiFieldValueStyle}>{resultData.concept.lighting}</div>
-                          </div>
-                          <div style={conceptSectionCardStyle}>
-                            <div style={conceptSectionTitleStyle}>Материалы</div>
-                            <div style={aiFieldValueStyle}>{resultData.concept.materials}</div>
-                          </div>
-                          <div style={conceptSectionCardStyle}>
-                            <div style={conceptSectionTitleStyle}>Акценты</div>
-                            <div style={aiFieldValueStyle}>{resultData.concept.accents}</div>
-                          </div>
-                          <div style={conceptSectionCardStyle}>
-                            <div style={conceptSectionTitleStyle}>Хранение</div>
-                            <div style={aiFieldValueStyle}>{resultData.concept.storage}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        ...aiEmptyStateStyle,
-                        ...(isGenerateLoading
-                          ? generateRevealStyle(false)
-                          : { opacity: 1, transform: "translateY(0px)", transition: "none" }),
-                      }}
-                    >
-                      <div style={aiEmptyTitleStyle}>Результат концепции</div>
-                      <div style={aiEmptyTextStyle}>
-                        {generateError
-                          ? generateError
-                          : isGenerateLoading
-                            ? "Генерируем концепцию..."
-                            : "Опишите интерьер в поле выше и нажмите «Сгенерировать» — мы соберем концепцию в структуре."}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              ) : null}
 
               {resultData ? (
                 <>
@@ -7218,17 +7375,15 @@ export default function Home() {
               ) : null}
               </div>
 
-              <div style={{ ...analyzeResultModuleStyle, width: "100%", alignSelf: "stretch" }}>
-                <div style={aiResultHeaderAnalyzeStyle}>
-                  <div style={aiResultHeaderTitleStyle}>АНАЛИЗ СЦЕНЫ</div>
+              <div style={{ ...workspaceResultModuleStyle, width: "100%", alignSelf: "stretch" }}>
+                <div style={workspaceSectionHeaderStyle}>
+                  <div style={aiResultHeaderTitleStyle}>Рабочая зона</div>
                   <div style={aiResultHeaderSubtitleStyle}>
                     {semanticDraft
-                      ? semanticDraft?.demoFallback
-                        ? "Demo fallback semanticDraft для Visual Discovery"
-                        : "Семантический разбор сцены готов"
+                      ? "Краткий итог анализа — подробности в блоках AI / BIM / Смета ниже"
                       : isAnalyzeLoading
                         ? "Анализ интерьерной сцены..."
-                        : "Загрузите изображение и нажмите «Анализировать интерьер»"}
+                        : "Загрузите изображение и запустите анализ"}
                   </div>
                   {demoFallbackNotice ? (
                     <div
@@ -7316,74 +7471,6 @@ export default function Home() {
                       ) : null}
                     </div>
                   ) : null}
-                  {semanticDraft ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "8px",
-                        marginTop: "12px",
-                        alignItems: isMobile ? "stretch" : "flex-start",
-                      }}
-                    >
-                      {activeBudgetDraft ? (
-                        <div
-                          style={{
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            lineHeight: 1.45,
-                            color: isDark ? "rgba(243,238,231,0.9)" : "rgba(43,43,43,0.9)",
-                          }}
-                        >
-                          Черновик сметы создан
-                          {Array.isArray(activeBudgetDraft.normalizedSpecGroups) &&
-                          activeBudgetDraft.normalizedSpecGroups.length
-                            ? ` · ${activeBudgetDraft.normalizedSpecGroups.length} категорий`
-                            : ""}
-                          {(() => {
-                            const brandNames = new Set();
-                            for (const group of activeBudgetDraft.normalizedSpecGroups || []) {
-                              for (const brand of group?.supplierCandidates?.matchedBrands || []) {
-                                const name =
-                                  typeof brand?.brandName === "string" ? brand.brandName.trim() : "";
-                                if (name) brandNames.add(name);
-                              }
-                            }
-                            return brandNames.size ? ` · ${brandNames.size} брендов` : "";
-                          })()}
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCreateBudgetDraft();
-                            }}
-                            disabled={isRunning}
-                            style={{
-                              ...actionButtonStyle,
-                              alignSelf: isMobile ? "stretch" : undefined,
-                              width: isMobile ? "100%" : undefined,
-                              opacity: isRunning ? 0.6 : 1,
-                              cursor: isRunning ? "default" : "pointer",
-                            }}
-                          >
-                            Создать черновик сметы
-                          </button>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              lineHeight: 1.45,
-                              color: isDark ? "rgba(243,238,231,0.68)" : "rgba(110,106,102,0.88)",
-                            }}
-                          >
-                            Подготовка категорий для сметы и подбора поставщиков из реестра.
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
                   {process.env.NODE_ENV === "development" && semanticDraft ? (
                     <details
                       open={false}
@@ -7428,6 +7515,7 @@ export default function Home() {
                       visualProductCandidates={visualProductCandidates}
                       visualProductCandidatesLoading={visualProductCandidatesLoading}
                       visualProductCandidatesError={visualProductCandidatesError}
+                      placement="center"
                     />
                   ) : (
                     <div style={aiEmptyStateStyle}>
@@ -7437,7 +7525,7 @@ export default function Home() {
                           ? analyzeSceneError
                           : isAnalyzeLoading
                             ? "Анализ интерьерной сцены..."
-                            : "Загрузите изображение и нажмите «Анализировать интерьер» — появится semantic-разбор сцены."}
+                            : "Загрузите изображение и нажмите «Анализировать интерьер»."}
                       </div>
                     </div>
                   )}
@@ -7446,72 +7534,14 @@ export default function Home() {
             </div>
           )}
         </div>
-        {!isAnalyzeMode ? (
-        <div className="osa-stats-row" style={statsRowWrapperStyle}>
-          <div className="osa-stat-card" style={statStyle} {...statCardLightHoverHandlers}>
-            <div
-              style={{
-                fontSize: isMobile ? "22px" : "28px",
-                fontWeight: "600",
-                marginBottom: "6px",
-              }}
-            >
-              AI
-            </div>
-            <div
-              style={{
-                fontSize: isMobile ? "13px" : "14px",
-                lineHeight: "1.5",
-                color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.82)",
-              }}
-            >
-              Анализ визуального решения и переход к подбору
-            </div>
-          </div>
-
-          <div className="osa-stat-card" style={statStyle} {...statCardLightHoverHandlers}>
-            <div
-              style={{
-                fontSize: isMobile ? "22px" : "28px",
-                fontWeight: "600",
-                marginBottom: "6px",
-              }}
-            >
-              BIM
-            </div>
-            <div
-              style={{
-                fontSize: isMobile ? "13px" : "14px",
-                lineHeight: "1.5",
-                color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.82)",
-              }}
-            >
-              Основа для точных итераций, спецификаций и связок
-            </div>
-          </div>
-
-          <div className="osa-stat-card" style={statStyle} {...statCardLightHoverHandlers}>
-            <div
-              style={{
-                fontSize: isMobile ? "22px" : "28px",
-                fontWeight: "600",
-                marginBottom: "6px",
-              }}
-            >
-              Смета
-            </div>
-            <div
-              style={{
-                fontSize: isMobile ? "13px" : "14px",
-                lineHeight: "1.5",
-                color: isDark ? "rgba(243,238,231,0.64)" : "rgba(110,106,102,0.82)",
-              }}
-            >
-              Подготовка к смете и согласованию проекта с клиентом
-            </div>
-          </div>
-        </div>
-        ) : null}
+        <WorkspacePipelineCards
+          cards={workspacePipelineCards}
+          isDark={isDark}
+          isMobile={isMobile}
+          wrapperStyle={statsRowWrapperStyle}
+          cardStyle={statStyle}
+          hoverHandlers={statCardLightHoverHandlers}
+        />
         </div>
             </div>
 

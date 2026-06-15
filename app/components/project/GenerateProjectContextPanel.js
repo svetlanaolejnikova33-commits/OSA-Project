@@ -232,13 +232,6 @@ function GenerateProjectContextPanelInner({
               </div>
             </>
           ) : null}
-
-          <div style={{ ...sectionTitleStyle, marginTop: "22px" }}>Материалы</div>
-          <div style={contextPlaceholderCardStyle}>Скоро: подбор материалов и каталог.</div>
-          <div style={{ ...sectionTitleStyle, marginTop: "14px" }}>Смета</div>
-          <div style={{ ...contextPlaceholderCardStyle, marginBottom: 0 }}>
-            Скоро: ориентировочная смета по проекту.
-          </div>
         </div>
       )}
     </>

@@ -7,6 +7,9 @@ import { getSafeAnalysisTheme, isLightSwatchColor } from "../lib/getSafeAnalysis
 import { ConceptIntentSection } from "./ConceptIntentSection";
 import { SupplierMatchesSection } from "./SupplierMatchesSection";
 import { VisualProductDiscoverySection } from "./VisualProductDiscoverySection";
+import { BudgetRecommendationsSection } from "./BudgetRecommendationsSection";
+import { ProjectSelectionSection } from "./ProjectSelectionSection";
+import { sumPreviewBudgetRows } from "../lib/registry/buildPreviewBudgetRows";
 import {
   ANALYSIS_MODE_LABELS_RU,
   getAnalysisModeEmptyMessage,
@@ -80,31 +83,17 @@ function sortSpecificationGroups(groups) {
   });
 }
 
-/** Mobile accordion: essential path sections start expanded. */
-const MOBILE_SECTION_DEFAULT_OPEN = new Set(["summary", "style-intent", "visual-product-discovery"]);
+/** Essential path sections start expanded on first open. */
+const DEFAULT_EXPANDED_SECTIONS = new Set(["summary", "style-intent", "visual-product-discovery"]);
 
-function Section({ label, children, theme, isMobile = false, sectionKey }) {
-  const defaultExpanded = sectionKey == null ? true : MOBILE_SECTION_DEFAULT_OPEN.has(sectionKey);
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  if (!isMobile) {
-    return (
-      <div
-        style={{
-          width: "100%",
-          padding: theme.cardPadding || "18px 0",
-          background: "transparent",
-          border: "none",
-          borderBottom: `1px solid ${theme.border}`,
-          borderRadius: 0,
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={labelStyle(theme, false)}>{label}</div>
-        {children}
-      </div>
-    );
-  }
+function Section({ label, children, theme, isMobile = false, sectionKey, defaultExpanded }) {
+  const initialExpanded =
+    typeof defaultExpanded === "boolean"
+      ? defaultExpanded
+      : sectionKey == null
+        ? false
+        : DEFAULT_EXPANDED_SECTIONS.has(sectionKey);
+  const [expanded, setExpanded] = useState(initialExpanded);
 
   return (
     <div
@@ -126,7 +115,7 @@ function Section({ label, children, theme, isMobile = false, sectionKey }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: "10px",
-          padding: "14px 0 10px 0",
+          padding: isMobile ? "14px 0 10px 0" : "12px 0 8px 0",
           border: "none",
           background: "transparent",
           color: "inherit",
@@ -141,7 +130,16 @@ function Section({ label, children, theme, isMobile = false, sectionKey }) {
         </span>
       </button>
       {expanded ? (
-        <div style={{ paddingBottom: "16px", textAlign: "left", width: "100%", maxWidth: "100%" }}>{children}</div>
+        <div
+          style={{
+            paddingBottom: isMobile ? "16px" : "12px",
+            textAlign: "left",
+            width: "100%",
+            maxWidth: "100%",
+          }}
+        >
+          {children}
+        </div>
       ) : null}
     </div>
   );
@@ -627,7 +625,7 @@ function SceneSpatialMapSection({ sceneGraph, theme, text, isMobile = false }) {
   );
 }
 
-function PotentialBrandsSection({ budgetDraft, theme, text, isMobile = false }) {
+function PotentialBrandsSection({ budgetDraft, theme, text, isMobile = false, quiet = false }) {
   const groups = Array.isArray(budgetDraft?.normalizedSpecGroups)
     ? budgetDraft.normalizedSpecGroups.filter((entry) => asArray(entry?.supplierCandidates?.matchedBrands).length)
     : [];
@@ -668,12 +666,16 @@ function PotentialBrandsSection({ budgetDraft, theme, text, isMobile = false }) 
                   </span>
                 ))}
               </div>
-              <div style={{ ...text, marginTop: "8px", fontSize: "12px", color: theme.textSecondary }}>
-                suppliers: {entry.supplierCandidates?.supplierCount ?? matchedBrands.length}
-              </div>
-              <div style={{ ...text, fontSize: "12px", color: theme.textSecondary }}>
-                confidence: {entry.supplierCandidates?.confidence || "low"}
-              </div>
+              {!quiet ? (
+                <>
+                  <div style={{ ...text, marginTop: "8px", fontSize: "12px", color: theme.textSecondary }}>
+                    suppliers: {entry.supplierCandidates?.supplierCount ?? matchedBrands.length}
+                  </div>
+                  <div style={{ ...text, fontSize: "12px", color: theme.textSecondary }}>
+                    confidence: {entry.supplierCandidates?.confidence || "low"}
+                  </div>
+                </>
+              ) : null}
             </div>
           );
         })}
@@ -700,8 +702,9 @@ function budgetDraftButtonStyle(theme) {
   };
 }
 
-function BudgetDraftActionButton({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false }) {
+function BudgetDraftActionButton({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false, quiet = false }) {
   if (budgetDraft) {
+    if (quiet) return null;
     return (
       <div style={{ ...text, fontWeight: 600 }}>
         Черновик сметы создан
@@ -712,9 +715,16 @@ function BudgetDraftActionButton({ budgetDraft, onCreateBudgetDraft, theme, text
     );
   }
   return (
-    <button type="button" onClick={onCreateBudgetDraft} style={budgetDraftButtonStyle(theme)}>
-      Создать черновик сметы
-    </button>
+    <>
+      {quiet ? (
+        <div style={{ ...text, color: theme.textSecondary, fontSize: "13px", lineHeight: 1.5, marginBottom: "10px" }}>
+          Черновик сметы ещё не создан
+        </div>
+      ) : null}
+      <button type="button" onClick={onCreateBudgetDraft} style={budgetDraftButtonStyle(theme)}>
+        Создать черновик сметы
+      </button>
+    </>
   );
 }
 
@@ -762,7 +772,7 @@ function VisualProductDiscoveryBlock({
   );
 }
 
-function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false }) {
+function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isMobile = false, quiet = false }) {
   const groups = sortSpecificationGroups(budgetDraft?.groups || []);
   const normalizedGroups = Array.isArray(budgetDraft?.normalizedSpecGroups)
     ? budgetDraft.normalizedSpecGroups
@@ -770,12 +780,43 @@ function BudgetDraftSection({ budgetDraft, onCreateBudgetDraft, theme, text, isM
   if (!budgetDraft) {
     return (
       <Section label="Черновик сметы" theme={theme} isMobile={isMobile} sectionKey="budget">
-        <div style={{ ...text, color: theme.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
-          Создайте черновик сметы кнопкой в блоке «Анализ сцены».
-        </div>
+        {quiet ? (
+          <BudgetDraftActionButton
+            budgetDraft={budgetDraft}
+            onCreateBudgetDraft={onCreateBudgetDraft}
+            theme={theme}
+            text={text}
+            isMobile={isMobile}
+            quiet
+          />
+        ) : (
+          <div style={{ ...text, color: theme.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
+            Нажмите «Создать черновик сметы» выше — структура подтянется из SPEC-анализа.
+          </div>
+        )}
       </Section>
     );
   }
+
+  if (quiet) {
+    const categoryCount = normalizedGroups.length || groups.length;
+    const total = sumPreviewBudgetRows(budgetDraft.previewBudgetRows);
+    return (
+      <Section label="Черновик сметы" theme={theme} isMobile={isMobile} sectionKey="budget">
+        <div style={{ ...text, fontSize: "14px", lineHeight: 1.5 }}>
+          {categoryCount
+            ? `${categoryCount} ${categoryCount === 1 ? "категория" : categoryCount < 5 ? "категории" : "категорий"} в черновике`
+            : "Структура сметы готова"}
+        </div>
+        {total > 0 ? (
+          <div style={{ ...text, marginTop: "8px", fontSize: "14px", fontWeight: 600, lineHeight: 1.5 }}>
+            Предварительная сумма: ≈ {total.toLocaleString("ru-RU")} ₽
+          </div>
+        ) : null}
+      </Section>
+    );
+  }
+
   return (
     <Section label="Черновик сметы" theme={theme} isMobile={isMobile} sectionKey="budget">
       <>
@@ -847,6 +888,57 @@ function withMobileTheme(theme, isMobile) {
   };
 }
 
+function CompactAnalysisSummary({ semanticDraft, analysisMode, theme, text, isMobile }) {
+  const quick = semanticDraft?.quickAnalysis || {};
+  const pro = semanticDraft?.proAnalysis || {};
+  const spec = semanticDraft?.specAnalysis || {};
+  const mode = analysisMode;
+
+  const styleLine =
+    mode === "quick"
+      ? quick.styleAnalysis?.labelRu || quick.styleAnalysis?.primary || ""
+      : mode === "spec"
+        ? spec.styleAnalysis?.labelRu || spec.styleAnalysis?.primary || ""
+        : pro.styleAnalysis?.labelRu || pro.styleAnalysis?.primary || "";
+
+  const spaceLine =
+    mode === "quick"
+      ? quick.spaceType?.labelRu || quick.spaceType?.value || ""
+      : mode === "spec"
+        ? spec.spaceType?.labelRu || spec.spaceType?.value || ""
+        : pro.spaceType?.labelRu || pro.spaceType?.value || "";
+
+  const summaryLine =
+    mode === "quick"
+      ? quick.designIntent?.summaryRu || ""
+      : mode === "spec"
+        ? spec.designIntent?.summaryRu || ""
+        : pro.designIntent?.summaryRu || "";
+
+  if (!styleLine && !spaceLine && !summaryLine) return null;
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        textAlign: "left",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        padding: isMobile ? "4px 0 8px" : "4px 0 12px",
+      }}
+    >
+      {spaceLine ? (
+        <div style={{ ...text, fontSize: isMobile ? "14px" : "15px", fontWeight: 600 }}>{spaceLine}</div>
+      ) : null}
+      {styleLine ? <div style={text}>{styleLine}</div> : null}
+      {summaryLine ? (
+        <div style={{ ...text, color: theme.textSecondary, fontSize: "13px", lineHeight: 1.5 }}>{summaryLine}</div>
+      ) : null}
+    </div>
+  );
+}
+
 function ConceptIntentBlock({
   semanticDraft,
   theme,
@@ -895,12 +987,67 @@ export function VisionAnalysisPanel({
   visualProductCandidates = [],
   visualProductCandidatesLoading = false,
   visualProductCandidatesError = "",
+  placement = "pipeline",
+  selectedProjectItems = [],
+  onAddToProjectSelection,
+  onProjectSelectionStatusChange,
 }) {
   if (!semanticDraft) return null;
 
   const analysisMode = normalizeAnalysisMode(activeMode || semanticDraft.analysisMode);
   const theme = withMobileTheme(getSafeAnalysisTheme(semanticDraft, isDark, analysisMode), isMobile);
   const text = valueStyle(theme, isMobile);
+  const isCenterPlacement = placement === "center";
+  const isBudgetPlacement = placement === "budget";
+  const showConceptIntent = isCenterPlacement;
+  const showProductDiscovery = isCenterPlacement && showVisualProductDiscovery;
+  const hidePipelineChrome = placement === "pipeline" || placement === "budget";
+  const isBimPlacement = placement === "bim";
+
+  if (isBimPlacement) {
+    return (
+      <div className="osa-analysis-panel" style={{ width: "100%", textAlign: "left" }}>
+        <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
+        <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
+        <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
+      </div>
+    );
+  }
+
+  if (isBudgetPlacement) {
+    return (
+      <div className="osa-analysis-panel" style={{ width: "100%", textAlign: "left" }}>
+        <BudgetDraftSection
+          budgetDraft={budgetDraft}
+          onCreateBudgetDraft={onCreateBudgetDraft}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          quiet
+        />
+        <PotentialBrandsSection
+          budgetDraft={budgetDraft}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          quiet
+        />
+        <BudgetRecommendationsSection
+          budgetDraft={budgetDraft}
+          isDark={isDark}
+          isMobile={isMobile}
+          selectedProjectItems={selectedProjectItems}
+          onAddToProjectSelection={onAddToProjectSelection}
+        />
+        <ProjectSelectionSection
+          selectedProjectItems={selectedProjectItems}
+          isDark={isDark}
+          isMobile={isMobile}
+          onStatusChange={onProjectSelectionStatusChange}
+        />
+      </div>
+    );
+  }
 
   if (!hasSemanticDraftForMode(semanticDraft, analysisMode)) {
     return (
@@ -917,6 +1064,44 @@ export function VisionAnalysisPanel({
   const quick = semanticDraft.quickAnalysis || {};
   const pro = semanticDraft.proAnalysis || {};
   const spec = semanticDraft.specAnalysis || {};
+
+  if (isCenterPlacement) {
+    return (
+      <div className="osa-analysis-panel" style={{ width: "100%", textAlign: "left" }}>
+        <CompactAnalysisSummary
+          semanticDraft={semanticDraft}
+          analysisMode={analysisMode}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+        />
+        <VisualProductDiscoveryBlock
+          showVisualProductDiscovery={showProductDiscovery}
+          visualProductCandidates={visualProductCandidates}
+          visualProductCandidatesLoading={visualProductCandidatesLoading}
+          visualProductCandidatesError={visualProductCandidatesError}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          isDark={isDark}
+        />
+        {showConceptIntent ? (
+          <ConceptIntentBlock
+            semanticDraft={semanticDraft}
+            theme={theme}
+            text={text}
+            isMobile={isMobile}
+            onConceptIntentSubmit={onConceptIntentSubmit}
+            isConceptIntentProcessing={isConceptIntentProcessing}
+            conceptIntentError={conceptIntentError}
+            conceptIntentSuccess={conceptIntentSuccess}
+            conceptIntentResultVisualId={conceptIntentResultVisualId}
+            onAnalyzeConceptResult={onAnalyzeConceptResult}
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   const panelShell = () =>
     isMobile
@@ -1019,29 +1204,33 @@ export function VisionAnalysisPanel({
             ) : null}
           </Section>
         ) : null}
-        <VisualProductDiscoveryBlock
-          showVisualProductDiscovery={showVisualProductDiscovery}
-          visualProductCandidates={visualProductCandidates}
-          visualProductCandidatesLoading={visualProductCandidatesLoading}
-          visualProductCandidatesError={visualProductCandidatesError}
-          theme={theme}
-          text={text}
-          isMobile={isMobile}
-          isDark={isDark}
-        />
-        <ConceptIntentBlock
-          semanticDraft={semanticDraft}
-          theme={theme}
-          text={text}
-          isMobile={isMobile}
-          onConceptIntentSubmit={onConceptIntentSubmit}
-          isConceptIntentProcessing={isConceptIntentProcessing}
-          conceptIntentError={conceptIntentError}
-          conceptIntentSuccess={conceptIntentSuccess}
-          conceptIntentResultVisualId={conceptIntentResultVisualId}
-          onAnalyzeConceptResult={onAnalyzeConceptResult}
-        />
-        {budgetDraft && !isMobile ? (
+        {!hidePipelineChrome ? (
+          <VisualProductDiscoveryBlock
+            showVisualProductDiscovery={showVisualProductDiscovery}
+            visualProductCandidates={visualProductCandidates}
+            visualProductCandidatesLoading={visualProductCandidatesLoading}
+            visualProductCandidatesError={visualProductCandidatesError}
+            theme={theme}
+            text={text}
+            isMobile={isMobile}
+            isDark={isDark}
+          />
+        ) : null}
+        {!hidePipelineChrome ? (
+          <ConceptIntentBlock
+            semanticDraft={semanticDraft}
+            theme={theme}
+            text={text}
+            isMobile={isMobile}
+            onConceptIntentSubmit={onConceptIntentSubmit}
+            isConceptIntentProcessing={isConceptIntentProcessing}
+            conceptIntentError={conceptIntentError}
+            conceptIntentSuccess={conceptIntentSuccess}
+            conceptIntentResultVisualId={conceptIntentResultVisualId}
+            onAnalyzeConceptResult={onAnalyzeConceptResult}
+          />
+        ) : null}
+        {!hidePipelineChrome && budgetDraft && !isMobile ? (
           <Section label="Найденные поставщики" theme={theme} isMobile={isMobile} sectionKey="supplier-matches-pro">
             <SupplierMatchesSection
               budgetDraft={budgetDraft}
@@ -1223,9 +1412,13 @@ export function VisionAnalysisPanel({
             <Chips items={pro.designIntent.whatMustBePreserved} theme={theme} isMobile={isMobile} />
           </Section>
         ) : null}
-        <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
-        <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
-        <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
+        {!hidePipelineChrome ? (
+          <>
+            <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
+            <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
+            <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
+          </>
+        ) : null}
       </div>
     );
   }
@@ -1240,6 +1433,7 @@ export function VisionAnalysisPanel({
           Черновая спецификация по изображению. Точные артикулы, размеры и цены появятся после подключения каталогов и BIM-данных.
         </div>
       </Section>
+      {hidePipelineChrome ? null : (
       <Section label="Смета" theme={theme} isMobile={isMobile} sectionKey="budget-action">
         <BudgetDraftActionButton
           budgetDraft={budgetDraft}
@@ -1249,6 +1443,7 @@ export function VisionAnalysisPanel({
           isMobile={isMobile}
         />
       </Section>
+      )}
       {Array.isArray(spec.functionalZones) && spec.functionalZones.length ? (
         <Section label="Функциональные зоны" theme={theme} isMobile={isMobile} sectionKey="zones">
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -1348,38 +1543,48 @@ export function VisionAnalysisPanel({
           <Chips items={spec.whatMustBePreserved} theme={theme} isMobile={isMobile} />
         </Section>
       ) : null}
-      <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
-      <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
-      <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
-      <VisualProductDiscoveryBlock
-        showVisualProductDiscovery={showVisualProductDiscovery}
-        visualProductCandidates={visualProductCandidates}
-        visualProductCandidatesLoading={visualProductCandidatesLoading}
-        visualProductCandidatesError={visualProductCandidatesError}
-        theme={theme}
-        text={text}
-        isMobile={isMobile}
-        isDark={isDark}
-      />
-      <ConceptIntentBlock
-        semanticDraft={semanticDraft}
-        theme={theme}
-        text={text}
-        isMobile={isMobile}
-        onConceptIntentSubmit={onConceptIntentSubmit}
-        isConceptIntentProcessing={isConceptIntentProcessing}
-        conceptIntentError={conceptIntentError}
-        conceptIntentSuccess={conceptIntentSuccess}
-        conceptIntentResultVisualId={conceptIntentResultVisualId}
-        onAnalyzeConceptResult={onAnalyzeConceptResult}
-      />
-      <BudgetDraftSection
-        budgetDraft={budgetDraft}
-        onCreateBudgetDraft={onCreateBudgetDraft}
-        theme={theme}
-        text={text}
-        isMobile={isMobile}
-      />
+      {!hidePipelineChrome ? (
+        <>
+          <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
+          <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
+          <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
+        </>
+      ) : null}
+      {!hidePipelineChrome ? (
+        <VisualProductDiscoveryBlock
+          showVisualProductDiscovery={showVisualProductDiscovery}
+          visualProductCandidates={visualProductCandidates}
+          visualProductCandidatesLoading={visualProductCandidatesLoading}
+          visualProductCandidatesError={visualProductCandidatesError}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          isDark={isDark}
+        />
+      ) : null}
+      {!hidePipelineChrome ? (
+        <ConceptIntentBlock
+          semanticDraft={semanticDraft}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          onConceptIntentSubmit={onConceptIntentSubmit}
+          isConceptIntentProcessing={isConceptIntentProcessing}
+          conceptIntentError={conceptIntentError}
+          conceptIntentSuccess={conceptIntentSuccess}
+          conceptIntentResultVisualId={conceptIntentResultVisualId}
+          onAnalyzeConceptResult={onAnalyzeConceptResult}
+        />
+      ) : null}
+      {!hidePipelineChrome ? (
+        <BudgetDraftSection
+          budgetDraft={budgetDraft}
+          onCreateBudgetDraft={onCreateBudgetDraft}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+        />
+      ) : null}
       <PotentialBrandsSection budgetDraft={budgetDraft} theme={theme} text={text} isMobile={isMobile} />
     </div>
   );
