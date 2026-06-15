@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "kill:ports": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$ErrorActionPreference='SilentlyContinue'; $ports=@(3000,3001,3002); foreach($p in $ports){ $conns=Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue; if($conns){ $procIds=$conns | Select-Object -ExpandProperty OwningProcess -Unique; foreach($procId in $procIds){ if($procId -and $procId -ne 0){ try{ Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch{} } } } }; exit 0\"",
+    "dev": "next dev -p 3000",
+    "kill:ports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-osa-dev-ports.ps1",
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path .next) { Remove-Item -Recurse -Force .next }\"",
-    "dev:clean": "npm run kill:ports && npm run clean && next dev -p 3000",
+    "dev:clean": "npm run kill:ports && npm run clean && npm run dev",
     "build": "next build",
     "start": "next start"
   },

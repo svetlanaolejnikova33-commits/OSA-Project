@@ -1,12 +1,21 @@
 "use client";
 
-export function ProjectMaterials({ items, isDark, emptyLabel = "Материалы появятся после анализа." }) {
+import { memo } from "react";
+
+const EMPTY_MIN_HEIGHT = "52px";
+
+export const ProjectMaterials = memo(function ProjectMaterials({
+  items,
+  isDark,
+  emptyLabel = "Материалы появятся после анализа.",
+}) {
   if (!Array.isArray(items) || !items.length) {
     return (
       <div
         style={{
           fontSize: "13px",
           lineHeight: 1.5,
+          minHeight: EMPTY_MIN_HEIGHT,
           color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
         }}
       >
@@ -16,7 +25,7 @@ export function ProjectMaterials({ items, isDark, emptyLabel = "Материал
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px", minHeight: EMPTY_MIN_HEIGHT }}>
       {items.map((item) => (
         <div
           key={item}
@@ -35,4 +44,4 @@ export function ProjectMaterials({ items, isDark, emptyLabel = "Материал
       ))}
     </div>
   );
-}
+});

@@ -215,6 +215,9 @@ export function buildWorkspaceSessionEnvelope({
         typeof ad.activeSavedAnalysisRecordId === "string" ? ad.activeSavedAnalysisRecordId : "",
       savedDocumentSnapshot: typeof ad.savedDocumentSnapshot === "string" ? ad.savedDocumentSnapshot : "",
       isAnalyzeResultVisible: ad.isAnalyzeResultVisible === true,
+      visualProductCandidates: Array.isArray(ad.visualProductCandidates) ? ad.visualProductCandidates : [],
+      visualProductCandidatesError:
+        typeof ad.visualProductCandidatesError === "string" ? ad.visualProductCandidatesError : "",
     },
     visuals: prev.visuals ?? null,
     analysisRecords: prev.analysisRecords ?? null,

@@ -1,8 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 
-export function ResponsiveSection({ title, titleStyle, isMobile, defaultOpen = false, children }) {
+export const ResponsiveSection = memo(function ResponsiveSection({
+  title,
+  titleStyle,
+  isMobile,
+  defaultOpen = false,
+  children,
+}) {
   const [open, setOpen] = useState(defaultOpen);
 
   if (!isMobile) {
@@ -30,4 +36,4 @@ export function ResponsiveSection({ title, titleStyle, isMobile, defaultOpen = f
       {open ? <div className="osa-sidebar-section-body">{children}</div> : null}
     </div>
   );
-}
+});

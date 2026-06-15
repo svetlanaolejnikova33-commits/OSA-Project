@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   saveImageToDB,
   getImageFromDB,
@@ -26,6 +26,7 @@ import { PlatformHeroBanner } from "./components/PlatformHeroBanner";
 import { AnalysisQualityCheckPanel } from "./components/AnalysisQualityCheckPanel";
 import { ProjectMemory } from "./components/project/ProjectMemory";
 import { ProjectSidebar } from "./components/project/ProjectSidebar";
+import { GenerateProjectContextPanel } from "./components/project/GenerateProjectContextPanel";
 import {
   normalizeSemanticDraft,
   createSemanticDraftFromPrompt,
@@ -148,7 +149,7 @@ function deriveIterationLabelFrom(meta) {
   if (it === IT_TEXT_EDIT_MOCK) return "ПРАВКА";
   if (it === IT_IMAGE_EDIT) return "ТОЧНАЯ ПРАВКА";
   if (it === IT_SKU_REPLACE_PENDING) return "ЗАМЕНА";
-  if (it === IT_CONTROLLED_REGENERATION) return "CONTROLLED";
+  if (it === IT_CONTROLLED_REGENERATION) return "ПЕРЕРАБОТКА";
   return "";
 }
 
@@ -163,7 +164,7 @@ function visualIterationBadgeText(item) {
   if (it === IT_TEXT_EDIT_MOCK) return "ПРАВКА";
   if (it === IT_IMAGE_EDIT) return "ТОЧНАЯ ПРАВКА";
   if (it === IT_SKU_REPLACE_PENDING) return "ЗАМЕНА";
-  if (it === IT_CONTROLLED_REGENERATION) return "CONTROLLED";
+  if (it === IT_CONTROLLED_REGENERATION) return "ПЕРЕРАБОТКА";
   if (item.variationLabel) return item.variationLabel;
   if (item.alternateKind && ALTERNATE_KIND_LABEL_RU[item.alternateKind]) {
     return ALTERNATE_KIND_LABEL_RU[item.alternateKind];
@@ -745,6 +746,48 @@ function normalizePalette(p) {
   };
 }
 
+function sessionGalleryRowSignature(row) {
+  if (!row || row.id == null) return "";
+  const b64Len = row.imageBase64 && String(row.imageBase64).trim() ? String(row.imageBase64).length : 0;
+  return [
+    row.id,
+    b64Len,
+    row.promptUsed || "",
+    row.title || "",
+    row.style || "",
+    row.mood || "",
+    row.createdAt || "",
+  ].join("|");
+}
+
+function sessionGalleriesEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (sessionGalleryRowSignature(a[i]) !== sessionGalleryRowSignature(b[i])) return false;
+  }
+  return true;
+}
+
+function promptVersionRowsEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (!left || !right) return false;
+    if (String(left.id) !== String(right.id)) return false;
+    if (String(left.text || "") !== String(right.text || "")) return false;
+  }
+  return true;
+}
+
+function projectMetaEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.title === b.title && a.style === b.style && a.mood === b.mood;
+}
+
 /** Preserve in-memory thumbnails when metadata rows are IndexedDB-backed (empty inline base64). */
 function mergeSessionGallerySnapshots(prevGallery, nextGallery) {
   if (!Array.isArray(nextGallery) || nextGallery.length === 0) {
@@ -999,6 +1042,39 @@ function resultDataMatchesActiveProject(resultData, activeProjectKey) {
   if (resultData.projectKey && resultData.projectKey === activeProjectKey) return true;
   if (!resultData.projectKey && resultData.title === activeProjectKey) return true;
   return false;
+}
+
+function analyzeSessionMatchesProjectKey(activeProjectKey, selectedImageId, stableProjectKey) {
+  const pk = activeProjectKey && String(activeProjectKey).trim();
+  if (!pk) return false;
+  if (stableProjectKey && String(stableProjectKey).trim() === pk) return true;
+  if (typeof selectedImageId === "string" && selectedImageId.includes(`:${pk}:`)) return true;
+  return false;
+}
+
+function hasProtectedAnalyzeSession({ semanticDraft, activeProjectKey, isAnalyzeMode }) {
+  if (!isAnalyzeMode) return false;
+  const pk = activeProjectKey && String(activeProjectKey).trim();
+  return Boolean(pk && semanticDraft && hasSemanticAnalysis(semanticDraft));
+}
+
+function shouldSkipIdbSemanticHydration({ semanticDraft, activeProjectKey, isAnalyzeMode }) {
+  return hasProtectedAnalyzeSession({ semanticDraft, activeProjectKey, isAnalyzeMode });
+}
+
+function devSessionLog(message, detail) {
+  if (process.env.NODE_ENV !== "development") return;
+  const throttleKey = detail !== undefined ? `${message}::${JSON.stringify(detail)}` : message;
+  const now = Date.now();
+  if (!devSessionLog._last) devSessionLog._last = new Map();
+  const prev = devSessionLog._last.get(throttleKey);
+  if (prev != null && now - prev < 4000) return;
+  devSessionLog._last.set(throttleKey, now);
+  if (detail !== undefined) {
+    console.log(`[OSA][dev][session] ${message}`, detail);
+  } else {
+    console.log(`[OSA][dev][session] ${message}`);
+  }
 }
 
 function extractUserBriefFromPromptUsed(promptUsed) {
@@ -1461,6 +1537,21 @@ export default function Home() {
   const workspaceSaveTimerRef = useRef(null);
   const createDraftDirtyRef = useRef(false);
   const persistWorkspaceSessionNowRef = useRef(() => {});
+  const lastPersistedEnvelopeSigRef = useRef("");
+  const lightAmbientSampleKeyRef = useRef("");
+  const registryBudgetHydratedRef = useRef(false);
+  const lastProjectGalleryHydrateSigRef = useRef("");
+  const activeProjectMetaRef = useRef(null);
+  const semanticDraftRef = useRef(null);
+  const visualProductCandidatesRef = useRef([]);
+
+  useEffect(() => {
+    semanticDraftRef.current = semanticDraft;
+  }, [semanticDraft]);
+
+  useEffect(() => {
+    visualProductCandidatesRef.current = visualProductCandidates;
+  }, [visualProductCandidates]);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 180);
@@ -1482,13 +1573,6 @@ export default function Home() {
     }
 
     let restoredMarker = false;
-
-    if (envelope.projectKey && String(envelope.projectKey).trim()) {
-      const pk = String(envelope.projectKey).trim();
-      stableSessionProjectKeyRef.current = pk;
-      persistActiveProjectKey(pk);
-      setActiveProjectKey(pk);
-    }
 
     if (envelope.activeMode === "analyze") {
       setMode("analyze");
@@ -1568,6 +1652,26 @@ export default function Home() {
     if (ad.isAnalyzeResultVisible === true) {
       setIsAnalyzeResultVisible(true);
     }
+    if (Array.isArray(ad.visualProductCandidates) && ad.visualProductCandidates.length) {
+      setVisualProductCandidates(ad.visualProductCandidates);
+      restoredMarker = true;
+    }
+    if (typeof ad.visualProductCandidatesError === "string" && ad.visualProductCandidatesError.trim()) {
+      setVisualProductCandidatesError(ad.visualProductCandidatesError);
+    }
+
+    if (envelope.projectKey && String(envelope.projectKey).trim()) {
+      const pk = String(envelope.projectKey).trim();
+      stableSessionProjectKeyRef.current = pk;
+      const isAnalyzeSession = envelope.activeMode === "analyze";
+      const hasGenerateWork =
+        (cd.resultData && typeof cd.resultData === "object") ||
+        (Array.isArray(cd.sessionVisualGallery) && cd.sessionVisualGallery.length > 0);
+      if (isAnalyzeSession || hasGenerateWork) {
+        persistActiveProjectKey(pk);
+        setActiveProjectKey(pk);
+      }
+    }
 
     const slimGallery = Array.isArray(cd.sessionVisualGallery) ? cd.sessionVisualGallery : [];
 
@@ -1623,6 +1727,7 @@ export default function Home() {
       if (cancelled) return;
       setHasRestoredWorkspaceSession(true);
       if (anyRestored) {
+        devSessionLog("workspace session restored from storage");
         setCreateDraftPersistStatus("restored");
         window.setTimeout(() => {
           setCreateDraftPersistStatus((s) => (s === "restored" ? "idle" : s));
@@ -1665,12 +1770,21 @@ export default function Home() {
 
   useEffect(() => {
     if (isDark || !stablePreviewImageBase64) {
-      setLightAmbientRgb(null);
+      lightAmbientSampleKeyRef.current = "";
+      setLightAmbientRgb((prev) => (prev == null ? prev : null));
       return;
     }
+    const sampleKey = stablePreviewImageBase64.slice(0, 96);
+    if (lightAmbientSampleKeyRef.current === sampleKey) return;
+    lightAmbientSampleKeyRef.current = sampleKey;
     let cancelled = false;
     sampleAmbientRgbFromBase64(stablePreviewImageBase64, (rgb) => {
-      if (!cancelled) setLightAmbientRgb(rgb);
+      if (cancelled) return;
+      setLightAmbientRgb((prev) => {
+        if (!rgb && !prev) return prev;
+        if (rgb && prev && rgb.r === prev.r && rgb.g === prev.g && rgb.b === prev.b) return prev;
+        return rgb;
+      });
     });
     return () => {
       cancelled = true;
@@ -1693,6 +1807,14 @@ export default function Home() {
 
   const projectList = useMemo(() => buildProjectListFromVisuals(savedVisuals), [savedVisuals]);
 
+  const hasGenerateProjectWorkspace = useMemo(() => {
+    if (!activeProjectKey) return false;
+    if (resultDataMatchesActiveProject(resultData, activeProjectKey)) return true;
+    if (sessionVisualGallery.length > 0) return true;
+    return projectList.some((p) => p.key === activeProjectKey);
+  }, [activeProjectKey, resultData, sessionVisualGallery, projectList]);
+
+  const rightContextVisualRef = useRef(null);
   const rightContextVisual = useMemo(() => {
     if (!activeProjectKey || !selectedSessionVisual) return null;
     const saved = savedVisuals.find((s) => s.id === selectedSessionVisual.id);
@@ -1703,7 +1825,7 @@ export default function Home() {
       (selectedSessionVisual.imageBase64 && String(selectedSessionVisual.imageBase64).trim()) ||
       (saved?.imageBase64 && String(saved.imageBase64).trim()) ||
       "";
-    return {
+    const next = {
       kind: saved ? "saved" : "session",
       imageBase64,
       promptUsed: selectedSessionVisual.promptUsed,
@@ -1713,30 +1835,55 @@ export default function Home() {
       variantId: selectedSessionVisual.id,
       createdAt: selectedSessionVisual.createdAt,
     };
+    const prev = rightContextVisualRef.current;
+    if (
+      prev &&
+      prev.variantId === next.variantId &&
+      prev.title === next.title &&
+      prev.style === next.style &&
+      prev.mood === next.mood &&
+      prev.imageBase64 === next.imageBase64 &&
+      prev.promptUsed === next.promptUsed &&
+      prev.createdAt === next.createdAt &&
+      prev.kind === next.kind
+    ) {
+      return prev;
+    }
+    rightContextVisualRef.current = next;
+    return next;
   }, [activeProjectKey, selectedSessionVisual, resultData, savedVisuals]);
 
   const activeProjectMeta = useMemo(() => {
     if (!activeProjectKey) return null;
+    let next;
     if (resultDataMatchesActiveProject(resultData, activeProjectKey)) {
-      return {
+      next = {
         title: resultData.title,
         style: resultData.style,
         mood: resultData.mood,
       };
+    } else {
+      const proj = projectList.find((p) => p.key === activeProjectKey);
+      if (proj?.latest) {
+        next = {
+          title: proj.title,
+          style: proj.latest.style ?? "",
+          mood: proj.latest.mood ?? "",
+        };
+      } else {
+        next = {
+          title: resultData?.title || proj?.title || "Концепция в работе",
+          style: "",
+          mood: "",
+        };
+      }
     }
-    const proj = projectList.find((p) => p.key === activeProjectKey);
-    if (proj?.latest) {
-      return {
-        title: proj.title,
-        style: proj.latest.style ?? "",
-        mood: proj.latest.mood ?? "",
-      };
+    const prev = activeProjectMetaRef.current;
+    if (projectMetaEqual(prev, next)) {
+      return prev;
     }
-    return {
-      title: activeProjectKey,
-      style: "",
-      mood: "",
-    };
+    activeProjectMetaRef.current = next;
+    return next;
   }, [activeProjectKey, resultData, projectList]);
 
   const activePromptVersion = useMemo(() => {
@@ -1766,7 +1913,14 @@ export default function Home() {
     );
     if (!family) return null;
     return buildWorkspaceProjectPalette(family, isDark);
-  }, [activeProjectKey, activeProjectMeta, selectedSessionVisual?.promptUsed, isDark]);
+  }, [
+    activeProjectKey,
+    activeProjectMeta?.style,
+    activeProjectMeta?.mood,
+    activeProjectMeta?.title,
+    selectedSessionVisual?.promptUsed,
+    isDark,
+  ]);
 
   useEffect(() => {
     if (!selectedImagePreviewUrl) return;
@@ -2329,6 +2483,17 @@ export default function Home() {
       skipNextSemanticIdbHydrationRef.current = false;
       return;
     }
+    const inMemoryDraft = semanticDraftRef.current;
+    if (
+      shouldSkipIdbSemanticHydration({
+        semanticDraft: inMemoryDraft,
+        activeProjectKey,
+        isAnalyzeMode,
+      })
+    ) {
+      devSessionLog("skip IDB semantic hydration — active analyze session preserved");
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -2337,6 +2502,17 @@ export default function Home() {
         setAnalyzeHistory(rows);
         const latest = rows && rows.length ? rows[0] : await getLatestSemanticAnalysis(activeProjectKey);
         if (!latest || cancelled) return;
+        if (
+          semanticDraftRef.current &&
+          shouldSkipIdbSemanticHydration({
+            semanticDraft: semanticDraftRef.current,
+            activeProjectKey,
+            isAnalyzeMode,
+          })
+        ) {
+          devSessionLog("skip IDB restore — in-memory analyze session won");
+          return;
+        }
         await restoreSemanticAnalysisFromRecord(latest);
       } catch (e) {
         console.warn("OSA: failed to hydrate semantic analysis history:", e);
@@ -2345,7 +2521,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectKey]);
+  }, [activeProjectKey, isAnalyzeMode, selectedImageId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2359,7 +2535,14 @@ export default function Home() {
           Array.isArray(data.supplierSources) &&
           data.supplierSources.length > 0
         ) {
-          setRegistrySupplierSources(data.supplierSources);
+          setRegistrySupplierSources((prev) => {
+            try {
+              if (prev && JSON.stringify(prev) === JSON.stringify(data.supplierSources)) return prev;
+            } catch {
+              /* compare failed — accept update */
+            }
+            return data.supplierSources;
+          });
         }
       } catch (e) {
         console.warn("[OSA] registry preload failed:", e);
@@ -2371,6 +2554,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (registryBudgetHydratedRef.current) return;
     if (!registrySupplierSources?.length || !activeProjectKey || !semanticDraft?.specAnalysis) return;
     const linkageId =
       activeSavedAnalysisRecordId || (selectedImageId ? `pending:${selectedImageId}` : "");
@@ -2379,9 +2563,10 @@ export default function Home() {
     if (!existing) return;
     const payload = buildBudgetDraftPayload(existing, linkageId);
     if (!payload) return;
+    registryBudgetHydratedRef.current = true;
     upsertBudgetDraft(payload);
     setBudgetDraftsVersion((value) => value + 1);
-  }, [registrySupplierSources]);
+  }, [registrySupplierSources, activeProjectKey, semanticDraft, activeSavedAnalysisRecordId, selectedImageId]);
 
   const showVisualProductDiscovery = useMemo(
     () => hasLightingPendantsCategory(semanticDraft),
@@ -2392,9 +2577,23 @@ export default function Home() {
     let cancelled = false;
 
     if (!semanticDraft || !showVisualProductDiscovery) {
+      if (visualProductCandidatesRef.current.length && semanticDraftRef.current) {
+        devSessionLog("skip visual product candidate reset — semantic draft still active");
+        return () => {
+          cancelled = true;
+        };
+      }
       setVisualProductCandidates([]);
       setVisualProductCandidatesLoading(false);
       setVisualProductCandidatesError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (visualProductCandidatesRef.current.length) {
+      devSessionLog("reuse in-memory visual product candidates");
+      setVisualProductCandidatesLoading((loading) => (loading ? false : loading));
       return () => {
         cancelled = true;
       };
@@ -2442,14 +2641,6 @@ export default function Home() {
       console.warn("[OSA][dev] localStorage read failed:", e);
     }
   }, []);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
-    // Diagnostics for “Правка выбранного визуала” visibility.
-    const visible = Boolean(selectedSessionVisual && mode === "generate" && resultData);
-    console.log("[OSA][dev] edit visual block visible:", visible);
-    console.log("[OSA][dev] selectedSessionVisual id:", selectedSessionVisual?.id || null);
-  }, [selectedSessionVisual?.id, mode, resultData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2618,11 +2809,11 @@ export default function Home() {
 
   useEffect(() => {
     if (selectedSessionVisual) {
-      setIsImageVisible(false);
-      const id = window.requestAnimationFrame(() => setIsImageVisible(true));
-      return () => window.cancelAnimationFrame(id);
+      setIsImageVisible((prev) => (prev ? prev : true));
+      return undefined;
     }
     setIsImageVisible(false);
+    return undefined;
   }, [selectedSessionVisual?.id]);
 
   useEffect(() => {
@@ -2637,22 +2828,40 @@ export default function Home() {
     const prev = prevActiveProjectKeyRef.current;
     prevActiveProjectKeyRef.current = activeProjectKey;
     if (prev && !activeProjectKey) {
-      setSessionVisualGallery([]);
-      setSelectedSessionVisualId(null);
-      setResultData(null);
+      if (
+        isAnalyzeMode &&
+        semanticDraftRef.current &&
+        hasSemanticAnalysis(semanticDraftRef.current)
+      ) {
+        devSessionLog("prevented gallery reset — analyze semantic draft still in memory", {
+          previousProjectKey: prev,
+        });
+        prevActiveProjectKeyRef.current = prev;
+        stableSessionProjectKeyRef.current = prev;
+        persistActiveProjectKey(prev);
+        setActiveProjectKey((current) => (current == null ? prev : current));
+        return;
+      }
+      setSessionVisualGallery((gallery) => (gallery.length ? [] : gallery));
+      setSelectedSessionVisualId((sel) => (sel == null ? sel : null));
+      setResultData((data) => (data == null ? data : null));
     }
-  }, [activeProjectKey]);
+  }, [activeProjectKey, isAnalyzeMode]);
 
   useEffect(() => {
     if (!activeProjectKey) {
-      setPromptVersions([]);
-      setActivePromptVersionIdState(null);
-      setPromptHistoryOpen(false);
+      setPromptVersions((prev) => (prev.length ? [] : prev));
+      setActivePromptVersionIdState((prev) => (prev == null ? prev : null));
+      setPromptHistoryOpen((open) => (open ? false : open));
       return;
     }
-    setPromptVersions(getPromptVersionsForProject(activeProjectKey).slice().reverse());
-    setActivePromptVersionIdState(getActivePromptVersionId(activeProjectKey));
-    setPromptHistoryOpen(false);
+    const nextVersions = getPromptVersionsForProject(activeProjectKey).slice().reverse();
+    setPromptVersions((prev) => (promptVersionRowsEqual(prev, nextVersions) ? prev : nextVersions));
+    const nextActiveId = getActivePromptVersionId(activeProjectKey);
+    setActivePromptVersionIdState((prev) =>
+      Object.is(prev, nextActiveId) || String(prev ?? "") === String(nextActiveId ?? "") ? prev : nextActiveId
+    );
+    setPromptHistoryOpen((open) => (open ? false : open));
   }, [activeProjectKey]);
 
   useEffect(() => {
@@ -2682,11 +2891,22 @@ export default function Home() {
   }, [resultData, activeProjectKey]);
 
   useEffect(() => {
+    if (!activeProjectKey) {
+      lastProjectGalleryHydrateSigRef.current = "";
+    }
+  }, [activeProjectKey]);
+
+  useEffect(() => {
     if (!activeProjectKey) return;
     const proj = projectList.find((p) => p.key === activeProjectKey);
     if (!proj?.items?.length) {
       return;
     }
+    const hydrateSig = `${activeProjectKey}|${proj.items.map((item) => item.id).join(",")}`;
+    if (lastProjectGalleryHydrateSigRef.current === hydrateSig) {
+      return;
+    }
+    lastProjectGalleryHydrateSigRef.current = hydrateSig;
     const nextGallery = proj.items.map((item) => ({
       id: item.id,
       imageBase64: item.imageBase64,
@@ -2717,15 +2937,22 @@ export default function Home() {
       projectKey: typeof item.projectKey === "string" ? item.projectKey : "",
       semanticDraft: normalizeSemanticDraft(item.semanticDraft),
     }));
-    setSessionVisualGallery((prevGallery) =>
-      mergeSessionGallerySnapshots(prevGallery, nextGallery)
-    );
+    setSessionVisualGallery((prevGallery) => {
+      const merged = mergeSessionGallerySnapshots(prevGallery, nextGallery);
+      if (sessionGalleriesEqual(prevGallery, merged)) return prevGallery;
+      return merged;
+    });
     const galleryIds = nextGallery.map((x) => x.id);
     const preferred = pickStoredPreferredVisualId(activeProjectKey, galleryIds);
     setSelectedSessionVisualId((prevSel) => {
-      if (preferred) return preferred;
-      if (prevSel && nextGallery.some((x) => x.id === prevSel)) return prevSel;
-      return nextGallery[0]?.id ?? null;
+      const nextSel = preferred
+        ? preferred
+        : prevSel && nextGallery.some((x) => x.id === prevSel)
+          ? prevSel
+          : nextGallery[0]?.id ?? null;
+      return Object.is(prevSel, nextSel) || String(prevSel ?? "") === String(nextSel ?? "")
+        ? prevSel
+        : nextSel;
     });
     setResultData((prev) => {
       if (resultDataMatchesActiveProject(prev, activeProjectKey)) {
@@ -2737,7 +2964,7 @@ export default function Home() {
         if (hasFullConcept) return prev;
       }
       const L = proj.latest;
-      return {
+      const next = {
         title: L.title || proj.title || "Без названия",
         style: L.style || "",
         mood: L.mood || "",
@@ -2746,6 +2973,18 @@ export default function Home() {
         materials: [],
         concept: { planning: "", lighting: "", materials: "", accents: "", storage: "" },
       };
+      if (
+        prev &&
+        resultDataMatchesActiveProject(prev, activeProjectKey) &&
+        prev.title === next.title &&
+        prev.style === next.style &&
+        prev.mood === next.mood &&
+        prev.projectKey === next.projectKey &&
+        (!prev.materials || prev.materials.length === 0)
+      ) {
+        return prev;
+      }
+      return next;
     });
     const L = proj.latest;
     const brief = extractUserBriefFromPromptUsed(L.promptUsed);
@@ -2754,13 +2993,18 @@ export default function Home() {
     const activeV = activeId ? versionsAsc.find((v) => v && String(v.id) === String(activeId)) : null;
     const savedPrompt = getStoredProjectPrompt(activeProjectKey);
     if (!preferSessionInteriorDraftRef.current || !isGenerateMode) {
-      setInteriorDescription(() => {
+      setInteriorDescription((prev) => {
+        let next = prev;
         if (activeV && typeof activeV.text === "string" && normalizePromptText(activeV.text)) {
-          return activeV.text;
+          next = activeV.text;
+        } else if (savedPrompt && savedPrompt.trim()) {
+          next = savedPrompt;
+        } else if (brief) {
+          next = brief;
+        } else {
+          next = `Концепция «${proj.title}»`;
         }
-        if (savedPrompt && savedPrompt.trim()) return savedPrompt;
-        if (brief) return brief;
-        return `Концепция «${proj.title}»`;
+        return prev === next ? prev : next;
       });
     }
   }, [activeProjectKey, projectList, isGenerateMode]);
@@ -2774,6 +3018,18 @@ export default function Home() {
     if (!activeProjectKey) return;
     if (projectList.some((p) => p.key === activeProjectKey)) return;
     if (
+      hasProtectedAnalyzeSession({
+        semanticDraft,
+        activeProjectKey,
+        isAnalyzeMode,
+      })
+    ) {
+      devSessionLog("skip activeProjectKey reset — protected analyze session", {
+        activeProjectKey,
+      });
+      return;
+    }
+    if (
       isAnalyzeMode &&
       semanticDraft &&
       typeof selectedImageId === "string" &&
@@ -2786,14 +3042,32 @@ export default function Home() {
     }
     if (
       isGenerateMode &&
+      activeProjectKey &&
+      stableSessionProjectKeyRef.current === activeProjectKey &&
+      !projectList.some((p) => p.key === activeProjectKey) &&
+      !resultDataMatchesActiveProject(resultData, activeProjectKey) &&
+      sessionVisualGallery.length === 0 &&
+      normalizePromptText(interiorDescription)
+    ) {
+      devSessionLog("demote orphan draft project key — no generated workspace yet");
+      persistActiveProjectKey(null);
+      setActiveProjectKey((current) => (current == null ? current : null));
+      return;
+    }
+    if (
+      isGenerateMode &&
       stableSessionProjectKeyRef.current &&
       stableSessionProjectKeyRef.current === activeProjectKey &&
       normalizePromptText(interiorDescription)
     ) {
       return;
     }
+    devSessionLog("would reset activeProjectKey — no matching visual project", {
+      activeProjectKey,
+      projectCount: projectList.length,
+    });
     persistActiveProjectKey(null);
-    setActiveProjectKey(null);
+    setActiveProjectKey((current) => (current == null ? current : null));
   }, [
     projectList,
     activeProjectKey,
@@ -2803,6 +3077,7 @@ export default function Home() {
     selectedImageId,
     resultData,
     interiorDescription,
+    sessionVisualGallery,
   ]);
 
   useEffect(() => {
@@ -2836,9 +3111,9 @@ export default function Home() {
       : `${workspaceProjectPalette?.mainRadialExtraLight ?? ""}radial-gradient(50% 50% at 20% 10%, rgba(183,157,138,0.10), transparent), radial-gradient(40% 40% at 80% 30%, rgba(160,150,190,0.08), transparent), #F3EEE7`,
     color: isDark ? "#F3EEE7" : "#2B2B2B",
     fontFamily: "Inter,sans-serif",
-    transition: "background 0.4s ease, color 0.6s ease",
-    opacity: visible ? 1 : 0,
-    transform: visible ? "translateY(0px)" : "translateY(18px)",
+    transition: "none",
+    opacity: visible ? 1 : 1,
+    transform: "none",
   };
 
   const workspaceShellStyle = {
@@ -2873,45 +3148,51 @@ export default function Home() {
     boxSizing: "border-box",
   };
 
-  const sidePanelBaseStyle = {
-    borderRadius: isMobile ? "18px" : "16px",
-    padding: rv(isMobile, "20px 18px", "12px 14px"),
-    boxSizing: "border-box",
-    background: isDark
-      ? "linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))"
-      : "rgba(255,255,255,0.5)",
-    border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-    boxShadow: isDark
-      ? "0 18px 48px rgba(0,0,0,0.28)"
-      : "0 10px 28px rgba(0,0,0,0.05), 0 2px 16px rgba(160,150,190,0.07), inset 0 1px 0 rgba(255,255,255,0.55)",
-    backdropFilter: isDark ? "blur(18px)" : "blur(12px)",
-    WebkitBackdropFilter: isDark ? "blur(18px)" : "blur(12px)",
-    transition: "all 0.6s ease",
-    minWidth: 0,
-    ...(!isMobile
-      ? {
-          background: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.28)",
-          border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.03)",
-          boxShadow: "none",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-        }
-      : {}),
-  };
+  const sidePanelBaseStyle = useMemo(
+    () => ({
+      borderRadius: isMobile ? "18px" : "16px",
+      padding: rv(isMobile, "20px 18px", "12px 14px"),
+      boxSizing: "border-box",
+      background: isDark
+        ? "linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))"
+        : "rgba(255,255,255,0.5)",
+      border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+      boxShadow: isDark
+        ? "0 18px 48px rgba(0,0,0,0.28)"
+        : "0 10px 28px rgba(0,0,0,0.05), 0 2px 16px rgba(160,150,190,0.07), inset 0 1px 0 rgba(255,255,255,0.55)",
+      backdropFilter: isDark ? "blur(18px)" : "blur(12px)",
+      WebkitBackdropFilter: isDark ? "blur(18px)" : "blur(12px)",
+      transition: "none",
+      minWidth: 0,
+      ...(!isMobile
+        ? {
+            background: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.28)",
+            border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.03)",
+            boxShadow: "none",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
+          }
+        : {}),
+    }),
+    [isMobile, isDark]
+  );
 
-  const rightContextAsideStyle = {
-    ...sidePanelBaseStyle,
-    ...(workspaceProjectPalette
-      ? {
-          background: isDark
-            ? workspaceProjectPalette.rightBackgroundDark
-            : `${lightAmbientPanelOverlay}${workspaceProjectPalette.rightBackgroundLight}`,
-          border: workspaceProjectPalette.rightBorder,
-          boxShadow: workspaceProjectPalette.rightShadow,
-          transition: PROJECT_UI_SURFACE_TRANSITION,
-        }
-      : {}),
-  };
+  const rightContextAsideStyle = useMemo(
+    () => ({
+      ...sidePanelBaseStyle,
+      ...(workspaceProjectPalette
+        ? {
+            background: isDark
+              ? workspaceProjectPalette.rightBackgroundDark
+              : `${lightAmbientPanelOverlay}${workspaceProjectPalette.rightBackgroundLight}`,
+            border: workspaceProjectPalette.rightBorder,
+            boxShadow: workspaceProjectPalette.rightShadow,
+          }
+        : {}),
+      transition: "none",
+    }),
+    [sidePanelBaseStyle, workspaceProjectPalette, isDark, lightAmbientPanelOverlay]
+  );
 
   const sidePanelSectionTitleStyle = {
     fontSize: "11px",
@@ -3075,7 +3356,10 @@ export default function Home() {
             ? workspaceProjectPalette.workspaceCardDark.boxShadow
             : workspaceProjectPalette.workspaceCardLight.boxShadow,
           ...(isMobile
-            ? {}
+            ? {
+                boxShadow: "none",
+                border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.03)",
+              }
             : {
                 boxShadow: isDark
                   ? "0 22px 56px rgba(0,0,0,0.26), 0 0 72px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.05)"
@@ -3089,7 +3373,10 @@ export default function Home() {
             ? "0 22px 60px rgba(0,0,0,0.18)"
             : "0 10px 30px rgba(0,0,0,0.06), 0 2px 24px rgba(160,150,190,0.07), inset 0 1px 0 rgba(255,255,255,0.58)",
           ...(isMobile
-            ? {}
+            ? {
+                boxShadow: "none",
+                border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.03)",
+              }
             : {
                 background: isDark ? "rgba(255,255,255,0.042)" : "rgba(255,255,255,0.62)",
                 border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)",
@@ -3100,7 +3387,7 @@ export default function Home() {
         }),
     backdropFilter: isDark ? "blur(20px)" : "blur(14px)",
     WebkitBackdropFilter: isDark ? "blur(20px)" : "blur(14px)",
-    transition: workspaceProjectPalette ? PROJECT_UI_SURFACE_TRANSITION : "all 0.6s ease",
+    transition: "none",
   };
 
   const workspaceBodyStyle = {
@@ -3109,8 +3396,8 @@ export default function Home() {
     boxSizing: "border-box",
     padding: isMobile
       ? isAnalyzeMode
-        ? "14px 12px"
-        : "16px 12px"
+        ? "18px 14px"
+        : "18px 14px"
       : isAnalyzeMode
         ? "20px 22px 24px 22px"
         : "22px 24px 26px 24px",
@@ -3206,10 +3493,10 @@ export default function Home() {
         : "rgba(110,106,102,0.82)",
     background: active
       ? isDark
-        ? "linear-gradient(180deg,rgba(183,157,138,0.24),rgba(183,157,138,0.10))"
-        : "linear-gradient(180deg, rgba(183,157,138,0.22), rgba(214,197,180,0.16))"
+        ? "rgba(183,157,138,0.12)"
+        : "rgba(183,157,138,0.10)"
       : "transparent",
-    transition: "all 0.25s ease",
+    transition: "background 0.2s ease, color 0.2s ease",
   });
 
   const getProjectListRowStyle = (selected) => ({
@@ -3643,10 +3930,10 @@ export default function Home() {
 
   const fileInputStyle = { display: "none" };
 
-  const generateRevealStyle = (active) => ({
-    opacity: active ? 1 : 0,
-    transform: active ? "translateY(0px)" : "translateY(10px)",
-    transition: "opacity 320ms ease, transform 420ms ease",
+  const generateRevealStyle = () => ({
+    opacity: 1,
+    transform: "none",
+    transition: "none",
   });
 
   const imageModuleStyle = {
@@ -3677,7 +3964,6 @@ export default function Home() {
         }),
     backdropFilter: isDark ? "blur(16px)" : "blur(12px)",
     WebkitBackdropFilter: isDark ? "blur(16px)" : "blur(12px)",
-    ...(workspaceProjectPalette ? { transition: PROJECT_UI_SURFACE_TRANSITION } : {}),
   };
 
   const imageInnerStyle = {
@@ -3708,7 +3994,6 @@ export default function Home() {
             ? "0 16px 48px rgba(0,0,0,0.22)"
             : "0 12px 32px rgba(0,0,0,0.07), 0 2px 20px rgba(160,150,190,0.09), inset 0 1px 0 rgba(255,255,255,0.5)",
         }),
-    ...(workspaceProjectPalette ? { transition: PROJECT_UI_SURFACE_TRANSITION } : {}),
   };
 
   const imageDetailsToggleStyle = {
@@ -3728,7 +4013,7 @@ export default function Home() {
     display: "grid",
     gridTemplateRows: open ? "1fr" : "0fr",
     marginTop: open ? "14px" : "0px",
-    transition: "grid-template-rows 420ms ease, margin-top 420ms ease",
+    transition: "none",
   });
 
   const imageDetailsExpandInnerStyle = {
@@ -4022,7 +4307,7 @@ export default function Home() {
     boxSizing: "border-box",
   };
 
-  const handleDownloadVisualFile = async (imageBase64, createdAtIso, visualId) => {
+  const handleDownloadVisualFile = useCallback(async (imageBase64, createdAtIso, visualId) => {
     let b64 = imageBase64 && String(imageBase64).trim() ? imageBase64 : "";
     if (!b64 && visualId) {
       if (!isIndexedDbAvailable()) {
@@ -4046,7 +4331,7 @@ export default function Home() {
     const d = createdAtIso ? new Date(createdAtIso) : new Date();
     const name = buildVisualDownloadFilename(Number.isNaN(d.getTime()) ? new Date() : d);
     downloadPngFromBase64(b64, name);
-  };
+  }, []);
 
   const handleRemoveSavedVisual = (id) => {
     deleteImageFromDB(id);
@@ -4057,7 +4342,7 @@ export default function Home() {
     });
   };
 
-  const handleRemoveSessionVisual = (variantId) => {
+  const handleRemoveSessionVisual = useCallback((variantId) => {
     if (!variantId) return;
     deleteImageFromDB(variantId);
     setSessionVisualGallery((prev) => prev.filter((x) => x.id !== variantId));
@@ -4067,15 +4352,19 @@ export default function Home() {
       persistVisualHistoryRecords(next);
       return next;
     });
-  };
+  }, []);
 
-  const handleCycleSessionVariant = () => {
+  const handleCycleSessionVariant = useCallback(() => {
     if (sessionVisualGallery.length < 2) return;
     const idx = sessionVisualGallery.findIndex((v) => v.id === selectedSessionVisual?.id);
     const nextIdx = idx < 0 ? 0 : (idx + 1) % sessionVisualGallery.length;
     setSelectedSessionVisualId(sessionVisualGallery[nextIdx].id);
     setShowImagePromptDetails(false);
-  };
+  }, [sessionVisualGallery, selectedSessionVisual?.id]);
+
+  const handleToggleImagePromptDetails = useCallback(() => {
+    setShowImagePromptDetails((v) => !v);
+  }, []);
 
   const handleGenerateVisual = async (isAlternate = false) => {
     if (isImageRunning) return;
@@ -4908,6 +5197,15 @@ export default function Home() {
       extractedPalette,
       viewMode: selectedAnalysisMode,
     });
+    const projectKey =
+      activeProjectKey ||
+      stableSessionProjectKeyRef.current ||
+      (typeof selectedImageId === "string" && selectedImageId.includes(":")
+        ? selectedImageId.split(":")[1]
+        : "");
+    if (projectKey && !selectedImageId) {
+      setSelectedImageId(`analysis:${projectKey}:demo`);
+    }
     setActiveSavedAnalysisRecordId("");
     setSavedDocumentSnapshot("");
     setSemanticDraft(nextDraft);
@@ -5099,11 +5397,11 @@ export default function Home() {
       (activeProjectKey && String(activeProjectKey).trim()) ||
       (stableSessionProjectKeyRef.current && String(stableSessionProjectKeyRef.current).trim()) ||
       "";
-    if (!pk && normalizePromptText(interiorDescription)) {
-      pk = newStableId();
-      stableSessionProjectKeyRef.current = pk;
-      persistActiveProjectKey(pk);
-      setActiveProjectKey(pk);
+    if (!pk && mode === "generate" && normalizePromptText(interiorDescription)) {
+      if (!stableSessionProjectKeyRef.current) {
+        stableSessionProjectKeyRef.current = newStableId();
+      }
+      pk = stableSessionProjectKeyRef.current;
     }
     const nextEnvelope = buildWorkspaceSessionEnvelope({
       prevEnvelope: workspaceSessionEnvelopeRef.current,
@@ -5130,10 +5428,22 @@ export default function Home() {
         activeSavedAnalysisRecordId,
         savedDocumentSnapshot,
         isAnalyzeResultVisible,
+        visualProductCandidates,
+        visualProductCandidatesError,
       },
       validateSemanticDraft,
     });
     workspaceSessionEnvelopeRef.current = nextEnvelope;
+    let envelopeSig = "";
+    try {
+      envelopeSig = JSON.stringify(nextEnvelope);
+    } catch {
+      envelopeSig = String(Date.now());
+    }
+    if (envelopeSig === lastPersistedEnvelopeSigRef.current) {
+      return;
+    }
+    lastPersistedEnvelopeSigRef.current = envelopeSig;
     const ok = writeWorkspaceSessionEnvelope(nextEnvelope);
     if (ok && createDraftDirtyRef.current) {
       setCreateDraftPersistStatus("saved");
@@ -5177,6 +5487,8 @@ export default function Home() {
     isAnalyzeResultVisible,
     documentStoreVersion,
     budgetDraftsVersion,
+    visualProductCandidates,
+    visualProductCandidatesError,
   ]);
 
   const handleAtmosphereChoiceChange = (next) => {
@@ -5403,7 +5715,7 @@ export default function Home() {
           isDark={isDark}
           isMobile={isMobile}
           visible={visible}
-          compact={Boolean(activeProjectKey)}
+          compact={hasGenerateProjectWorkspace}
           integrated={!isMobile}
           workspaceNarrow={workspaceNarrow}
           lightAmbientHeroOverlay={lightAmbientHeroOverlay}
@@ -5435,7 +5747,7 @@ export default function Home() {
           </div>
 
           {isGenerateMode ? (
-            !activeProjectKey ? (
+            !hasGenerateProjectWorkspace ? (
             <>
               <div style={workspaceGeneratePromptBlockStyle}>
                 <div style={{ ...workspaceLabelStyle, marginBottom: "12px" }}>Описание интерьера</div>
@@ -5503,13 +5815,13 @@ export default function Home() {
 
               <div style={aiResultModuleStyle}>
                 <div style={aiResultHeaderGenerateStyle}>
-                  <div style={aiResultHeaderTitleStyle}>AI Concept Builder</div>
+                  <div style={aiResultHeaderTitleStyle}>Конструктор концепции</div>
                   <div style={aiResultHeaderSubtitleStyle}>
                     {resultData
                       ? "Концепция готова в структурированном виде"
                       : isGenerateLoading
                         ? "Генерируем концепцию..."
-                        : "Готовим ответ для вашего запроса"}
+                        : "Опишите интерьер и нажмите «Сгенерировать»"}
                   </div>
                 </div>
 
@@ -5524,7 +5836,7 @@ export default function Home() {
                           ...aiFieldCardGenerateStyle,
                           opacity: isGenerateResultVisible ? 1 : 0,
                           transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "opacity 320ms ease, transform 420ms ease",
+                          transition: "none",
                           transitionDelay: "0ms",
                         }}
                       >
@@ -5537,7 +5849,7 @@ export default function Home() {
                           ...aiFieldCardGenerateStyle,
                           opacity: isGenerateResultVisible ? 1 : 0,
                           transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "opacity 320ms ease, transform 420ms ease",
+                          transition: "none",
                           transitionDelay: "70ms",
                         }}
                       >
@@ -5550,7 +5862,7 @@ export default function Home() {
                           ...aiFieldCardGenerateStyle,
                           opacity: isGenerateResultVisible ? 1 : 0,
                           transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "opacity 320ms ease, transform 420ms ease",
+                          transition: "none",
                           transitionDelay: "140ms",
                         }}
                       >
@@ -5567,7 +5879,7 @@ export default function Home() {
                           ...aiFieldCardGenerateStyle,
                           opacity: isGenerateResultVisible ? 1 : 0,
                           transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "opacity 320ms ease, transform 420ms ease",
+                          transition: "none",
                           transitionDelay: "210ms",
                         }}
                       >
@@ -5586,7 +5898,7 @@ export default function Home() {
                           ...aiFieldCardGenerateStyle,
                           opacity: isGenerateResultVisible ? 1 : 0,
                           transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "opacity 320ms ease, transform 420ms ease",
+                          transition: "none",
                           transitionDelay: "280ms",
                         }}
                       >
@@ -5600,7 +5912,7 @@ export default function Home() {
                           gridColumn: "1 / -1",
                           opacity: isGenerateResultVisible ? 1 : 0,
                           transform: isGenerateResultVisible ? "translateY(0px)" : "translateY(10px)",
-                          transition: "opacity 320ms ease, transform 420ms ease",
+                          transition: "none",
                           transitionDelay: "350ms",
                         }}
                       >
@@ -5630,7 +5942,14 @@ export default function Home() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ ...aiEmptyStateStyle, ...generateRevealStyle(!isGenerateLoading) }}>
+                    <div
+                      style={{
+                        ...aiEmptyStateStyle,
+                        ...(isGenerateLoading
+                          ? generateRevealStyle(false)
+                          : { opacity: 1, transform: "translateY(0px)", transition: "none" }),
+                      }}
+                    >
                       <div style={aiEmptyTitleStyle}>Результат концепции</div>
                       <div style={aiEmptyTextStyle}>
                         {generateError
@@ -7067,6 +7386,7 @@ export default function Home() {
                   ) : null}
                   {process.env.NODE_ENV === "development" && semanticDraft ? (
                     <details
+                      open={false}
                       style={{
                         marginTop: "10px",
                         fontSize: "12px",
@@ -7178,7 +7498,7 @@ export default function Home() {
                 marginBottom: "6px",
               }}
             >
-              Budget
+              Смета
             </div>
             <div
               style={{
@@ -7224,251 +7544,29 @@ export default function Home() {
                 </div>
               )
             ) : (
-              <>
-            <div style={sidePanelSectionTitleStyle}>Контекст проекта</div>
-            {!activeProjectKey ? (
-              <div
-                style={{
-                  ...contextPlaceholderCardStyle,
-                  marginTop: 0,
-                  borderStyle: "solid",
-                  borderColor: isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.04)",
-                  color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
-                }}
-              >
-                Выберите проект слева.
-              </div>
-            ) : (
-              <div
-                style={{
-                  animation: "osaContextReveal 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94) both",
-                }}
-              >
-                {rightContextVisual ? (
-                  <>
-                    <div
-                      style={{
-                        borderRadius: "14px",
-                        overflow: "hidden",
-                        marginBottom: "12px",
-                        border: isDark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.04)",
-                        background: isDark ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.55)",
-                      }}
-                    >
-                      {rightContextVisual.imageBase64 &&
-                      String(rightContextVisual.imageBase64).trim() ? (
-                        <img
-                          src={`data:image/png;base64,${rightContextVisual.imageBase64}`}
-                          alt=""
-                          style={{ width: "100%", height: "auto", display: "block" }}
-                        />
-                      ) : (
-                        <div style={{ ...visualImageMissingStyle, minHeight: "120px" }}>
-                          Изображение не найдено
-                        </div>
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "15px",
-                        fontWeight: 600,
-                        marginBottom: "10px",
-                        lineHeight: 1.35,
-                        textAlign: "left",
-                      }}
-                    >
-                      {rightContextVisual.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        marginBottom: "6px",
-                        textAlign: "left",
-                        color: isDark ? "rgba(243,238,231,0.88)" : "rgba(43,43,43,0.88)",
-                      }}
-                    >
-                      <span style={{ opacity: 0.55 }}>Стиль · </span>
-                      {rightContextVisual.style || "—"}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        marginBottom: "14px",
-                        textAlign: "left",
-                        color: isDark ? "rgba(243,238,231,0.88)" : "rgba(43,43,43,0.88)",
-                      }}
-                    >
-                      <span style={{ opacity: 0.55 }}>Настроение · </span>
-                      {rightContextVisual.mood || "—"}
-                    </div>
-                    {rightContextVisual.promptUsed ? (
-                      <>
-                        <button
-                          type="button"
-                          style={{
-                            ...imageDetailsToggleStyle,
-                            maxWidth: "none",
-                            width: "100%",
-                            margin: "0 0 0 0",
-                            alignSelf: "stretch",
-                          }}
-                          onClick={() => setShowImagePromptDetails((v) => !v)}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = "translateY(-2px)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = "translateY(0px)";
-                          }}
-                        >
-                          {showImagePromptDetails ? "Скрыть детали" : "Показать детали"}
-                        </button>
-                        <div style={imageDetailsExpandGridStyle(showImagePromptDetails)}>
-                          <div style={imageDetailsExpandInnerStyle}>
-                            <pre style={imageDetailsPromptStyle}>{rightContextVisual.promptUsed}</pre>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "8px",
-                        marginTop: "16px",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        style={{
-                          ...primaryButton,
-                          width: "100%",
-                          margin: 0,
-                          padding: "11px 16px",
-                          fontSize: isMobile ? "13px" : "14px",
-                          borderRadius: "12px",
-                          boxSizing: "border-box",
-                        }}
-                        onClick={() =>
-                          handleDownloadVisualFile(
-                            rightContextVisual.imageBase64,
-                            rightContextVisual.createdAt,
-                            rightContextVisual.variantId
-                          )
-                        }
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = "translateY(-2px)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = "translateY(0px)";
-                        }}
-                      >
-                        Скачать визуал
-                      </button>
-                      <button
-                        type="button"
-                        style={{
-                          ...secondaryButton,
-                          width: "100%",
-                          margin: 0,
-                          padding: "11px 16px",
-                          fontSize: isMobile ? "13px" : "14px",
-                          borderRadius: "12px",
-                          boxSizing: "border-box",
-                        }}
-                        onClick={() => handleRemoveSessionVisual(rightContextVisual.variantId)}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = "translateY(-2px)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = "translateY(0px)";
-                        }}
-                      >
-                        Удалить вариант
-                      </button>
-                      <button
-                        type="button"
-                        style={{
-                          ...secondaryButton,
-                          width: "100%",
-                          margin: 0,
-                          padding: "11px 16px",
-                          fontSize: isMobile ? "13px" : "14px",
-                          borderRadius: "12px",
-                          boxSizing: "border-box",
-                          opacity: sessionContextAligned && sessionVisualGallery.length > 1 ? 1 : 0.45,
-                        }}
-                        disabled={!sessionContextAligned || sessionVisualGallery.length < 2}
-                        onClick={handleCycleSessionVariant}
-                        onMouseEnter={(e) => {
-                          if (!sessionContextAligned || sessionVisualGallery.length < 2) return;
-                          e.currentTarget.style.transform = "translateY(-2px)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = "translateY(0px)";
-                        }}
-                      >
-                        Выбрать вариант
-                      </button>
-                    </div>
-                  </>
-                ) : activeProjectMeta ? (
-                  <>
-                    <div
-                      style={{
-                        fontSize: "15px",
-                        fontWeight: 600,
-                        marginBottom: "10px",
-                        lineHeight: 1.35,
-                        textAlign: "left",
-                      }}
-                    >
-                      {activeProjectMeta.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        marginBottom: "6px",
-                        textAlign: "left",
-                        color: isDark ? "rgba(243,238,231,0.88)" : "rgba(43,43,43,0.88)",
-                      }}
-                    >
-                      <span style={{ opacity: 0.55 }}>Стиль · </span>
-                      {activeProjectMeta.style || "—"}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        marginBottom: "14px",
-                        textAlign: "left",
-                        color: isDark ? "rgba(243,238,231,0.88)" : "rgba(43,43,43,0.88)",
-                      }}
-                    >
-                      <span style={{ opacity: 0.55 }}>Настроение · </span>
-                      {activeProjectMeta.mood || "—"}
-                    </div>
-                    <div
-                      style={{
-                        ...contextPlaceholderCardStyle,
-                        borderStyle: "solid",
-                        borderColor: isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.04)",
-                        color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
-                        marginTop: 0,
-                      }}
-                    >
-                      Визуал появится здесь после генерации в рабочей зоне.
-                    </div>
-                  </>
-                ) : null}
-
-                <div style={{ ...sidePanelSectionTitleStyle, marginTop: "22px" }}>Материалы</div>
-                <div style={contextPlaceholderCardStyle}>Скоро: подбор материалов и каталог.</div>
-                <div style={{ ...sidePanelSectionTitleStyle, marginTop: "14px" }}>Смета</div>
-                <div style={{ ...contextPlaceholderCardStyle, marginBottom: 0 }}>
-                  Скоро: ориентировочная смета по проекту.
-                </div>
-              </div>
-            )}
-              </>
+              <GenerateProjectContextPanel
+                isDark={isDark}
+                isMobile={isMobile}
+                hasGenerateProjectWorkspace={hasGenerateProjectWorkspace}
+                rightContextVisual={rightContextVisual}
+                activeProjectMeta={activeProjectMeta}
+                showImagePromptDetails={showImagePromptDetails}
+                sessionContextAligned={sessionContextAligned}
+                sessionVisualGalleryLength={sessionVisualGallery.length}
+                sectionTitleStyle={sidePanelSectionTitleStyle}
+                contextPlaceholderCardStyle={contextPlaceholderCardStyle}
+                visualImageMissingStyle={visualImageMissingStyle}
+                imageDetailsToggleStyle={imageDetailsToggleStyle}
+                imageDetailsExpandGridStyle={imageDetailsExpandGridStyle}
+                imageDetailsExpandInnerStyle={imageDetailsExpandInnerStyle}
+                imageDetailsPromptStyle={imageDetailsPromptStyle}
+                primaryButton={primaryButton}
+                secondaryButton={secondaryButton}
+                onToggleImagePromptDetails={handleToggleImagePromptDetails}
+                onDownloadVisual={handleDownloadVisualFile}
+                onRemoveVisual={handleRemoveSessionVisual}
+                onCycleVariant={handleCycleSessionVariant}
+              />
             )}
           </aside>
         </div>

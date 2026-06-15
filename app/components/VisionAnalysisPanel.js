@@ -80,17 +80,8 @@ function sortSpecificationGroups(groups) {
   });
 }
 
-/** Mobile accordion: these blocks start expanded. */
-const MOBILE_SECTION_DEFAULT_OPEN = new Set([
-  "mode-pro",
-  "mode-quick",
-  "mode-spec",
-  "space",
-  "zones",
-  "style-intent",
-  "style",
-  "summary",
-]);
+/** Mobile accordion: essential path sections start expanded. */
+const MOBILE_SECTION_DEFAULT_OPEN = new Set(["summary", "style-intent", "visual-product-discovery"]);
 
 function Section({ label, children, theme, isMobile = false, sectionKey }) {
   const defaultExpanded = sectionKey == null ? true : MOBILE_SECTION_DEFAULT_OPEN.has(sectionKey);
@@ -122,6 +113,7 @@ function Section({ label, children, theme, isMobile = false, sectionKey }) {
         maxWidth: "100%",
         boxSizing: "border-box",
         borderBottom: `1px solid ${theme.border}`,
+        marginBottom: "2px",
       }}
     >
       <button
@@ -134,7 +126,7 @@ function Section({ label, children, theme, isMobile = false, sectionKey }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: "10px",
-          padding: "10px 0 8px 0",
+          padding: "14px 0 10px 0",
           border: "none",
           background: "transparent",
           color: "inherit",
@@ -149,7 +141,7 @@ function Section({ label, children, theme, isMobile = false, sectionKey }) {
         </span>
       </button>
       {expanded ? (
-        <div style={{ paddingBottom: "12px", textAlign: "left", width: "100%", maxWidth: "100%" }}>{children}</div>
+        <div style={{ paddingBottom: "16px", textAlign: "left", width: "100%", maxWidth: "100%" }}>{children}</div>
       ) : null}
     </div>
   );
@@ -478,7 +470,7 @@ function ConceptDNASection({ styleConsistency, theme, text, isMobile = false }) 
   }
 
   return (
-    <Section label="ДНК концепции" theme={theme} isMobile={isMobile} sectionKey="concept-dna">
+    <Section label="Логика концепции" theme={theme} isMobile={isMobile} sectionKey="concept-dna">
       {conceptDNA.styleCore ? <div style={text}>Стиль: {conceptDNA.styleCore}</div> : null}
       {conceptDNA.atmosphereCore ? (
         <div style={{ ...text, marginTop: "6px" }}>Атмосфера: {conceptDNA.atmosphereCore}</div>
@@ -589,7 +581,7 @@ function SceneSpatialMapSection({ sceneGraph, theme, text, isMobile = false }) {
   const resolveLabel = (id) => objectLabelById[id] || zoneLabelById[id] || id;
 
   return (
-    <Section label="Пространственная карта сцены" theme={theme} isMobile={isMobile} sectionKey="spatial">
+    <Section label="Структура сцены" theme={theme} isMobile={isMobile} sectionKey="spatial">
       {sourceLabel ? (
         <div style={{ ...text, fontSize: "11px", color: theme.textSecondary, marginBottom: "8px" }}>{sourceLabel}</div>
       ) : null}
@@ -935,10 +927,10 @@ export function VisionAnalysisPanel({
           minWidth: 0,
           boxSizing: "border-box",
           display: "block",
-          padding: theme.panelPadding,
-          borderRadius: "12px",
-          background: theme.background,
-          border: `1px solid ${theme.border}`,
+          padding: 0,
+          borderRadius: 0,
+          background: "transparent",
+          border: "none",
         }
       : {
           ...revealStyle,
@@ -963,6 +955,14 @@ export function VisionAnalysisPanel({
             Быстрый творческий разбор сцены
           </div>
         </Section>
+        {quick.designIntent?.summaryRu || quick.designIntent?.emotionalEffectRu ? (
+          <Section label="Краткий замысел" theme={theme} isMobile={isMobile} sectionKey="summary">
+            {quick.designIntent.summaryRu ? <div style={{ ...text, marginBottom: "8px" }}>{quick.designIntent.summaryRu}</div> : null}
+            {quick.designIntent.emotionalEffectRu ? (
+              <div style={{ ...text, color: theme.textSecondary }}>{quick.designIntent.emotionalEffectRu}</div>
+            ) : null}
+          </Section>
+        ) : null}
         {quick.spaceType?.labelRu || quick.spaceType?.value ? (
           <Section label="Назначение помещения" theme={theme} isMobile={isMobile} sectionKey="space">
             <div style={{ ...text, fontSize: "15px", fontWeight: 600 }}>
@@ -988,14 +988,6 @@ export function VisionAnalysisPanel({
           </Section>
         ) : null}
         <ColorLogicSection colorAnalysis={quick.colorAnalysis} theme={theme} text={text} isMobile={isMobile} />
-        {quick.designIntent?.summaryRu || quick.designIntent?.emotionalEffectRu ? (
-          <Section label="Краткий замысел" theme={theme} isMobile={isMobile} sectionKey="summary">
-            {quick.designIntent.summaryRu ? <div style={{ ...text, marginBottom: "8px" }}>{quick.designIntent.summaryRu}</div> : null}
-            {quick.designIntent.emotionalEffectRu ? (
-              <div style={{ ...text, color: theme.textSecondary }}>{quick.designIntent.emotionalEffectRu}</div>
-            ) : null}
-          </Section>
-        ) : null}
       </div>
     );
   }
@@ -1008,7 +1000,48 @@ export function VisionAnalysisPanel({
             Профессиональная интерьерная карта
           </div>
         </Section>
-        {budgetDraft ? (
+        {pro.designIntent?.summaryRu ||
+        pro.designIntent?.emotionalEffectRu ||
+        (Array.isArray(pro.designIntent?.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length) ? (
+          <Section label="Стиль и замысел" theme={theme} isMobile={isMobile} sectionKey="style-intent">
+            {pro.styleAnalysis?.labelRu || pro.styleAnalysis?.primary ? (
+              <div style={{ ...text, marginBottom: "8px" }}>
+                {pro.styleAnalysis.labelRu || pro.styleAnalysis.primary}
+                {formatConfidence(pro.styleAnalysis.confidence) ? ` · ${formatConfidence(pro.styleAnalysis.confidence)}` : ""}
+              </div>
+            ) : null}
+            {pro.designIntent.summaryRu ? <div style={{ ...text, marginBottom: "8px" }}>{pro.designIntent.summaryRu}</div> : null}
+            {pro.designIntent.emotionalEffectRu ? (
+              <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary }}>{pro.designIntent.emotionalEffectRu}</div>
+            ) : null}
+            {Array.isArray(pro.designIntent.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length ? (
+              <Chips items={pro.designIntent.keyDesignDrivers} theme={theme} isMobile={isMobile} />
+            ) : null}
+          </Section>
+        ) : null}
+        <VisualProductDiscoveryBlock
+          showVisualProductDiscovery={showVisualProductDiscovery}
+          visualProductCandidates={visualProductCandidates}
+          visualProductCandidatesLoading={visualProductCandidatesLoading}
+          visualProductCandidatesError={visualProductCandidatesError}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          isDark={isDark}
+        />
+        <ConceptIntentBlock
+          semanticDraft={semanticDraft}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+          onConceptIntentSubmit={onConceptIntentSubmit}
+          isConceptIntentProcessing={isConceptIntentProcessing}
+          conceptIntentError={conceptIntentError}
+          conceptIntentSuccess={conceptIntentSuccess}
+          conceptIntentResultVisualId={conceptIntentResultVisualId}
+          onAnalyzeConceptResult={onAnalyzeConceptResult}
+        />
+        {budgetDraft && !isMobile ? (
           <Section label="Найденные поставщики" theme={theme} isMobile={isMobile} sectionKey="supplier-matches-pro">
             <SupplierMatchesSection
               budgetDraft={budgetDraft}
@@ -1045,25 +1078,6 @@ export function VisionAnalysisPanel({
         {pro.atmosphereRu ? (
           <Section label="Атмосфера" theme={theme} isMobile={isMobile} sectionKey="atmosphere">
             <div style={text}>{pro.atmosphereRu}</div>
-          </Section>
-        ) : null}
-        {pro.designIntent?.summaryRu ||
-        pro.designIntent?.emotionalEffectRu ||
-        (Array.isArray(pro.designIntent?.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length) ? (
-          <Section label="Стиль и замысел" theme={theme} isMobile={isMobile} sectionKey="style-intent">
-            {pro.styleAnalysis?.labelRu || pro.styleAnalysis?.primary ? (
-              <div style={{ ...text, marginBottom: "8px" }}>
-                {pro.styleAnalysis.labelRu || pro.styleAnalysis.primary}
-                {formatConfidence(pro.styleAnalysis.confidence) ? ` · ${formatConfidence(pro.styleAnalysis.confidence)}` : ""}
-              </div>
-            ) : null}
-            {pro.designIntent.summaryRu ? <div style={{ ...text, marginBottom: "8px" }}>{pro.designIntent.summaryRu}</div> : null}
-            {pro.designIntent.emotionalEffectRu ? (
-              <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary }}>{pro.designIntent.emotionalEffectRu}</div>
-            ) : null}
-            {Array.isArray(pro.designIntent.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length ? (
-              <Chips items={pro.designIntent.keyDesignDrivers} theme={theme} isMobile={isMobile} />
-            ) : null}
           </Section>
         ) : null}
         <ColorLogicSection colorAnalysis={pro.colorAnalysis} theme={theme} text={text} isMobile={isMobile} />
@@ -1212,28 +1226,6 @@ export function VisionAnalysisPanel({
         <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
         <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
         <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
-        <VisualProductDiscoveryBlock
-          showVisualProductDiscovery={showVisualProductDiscovery}
-          visualProductCandidates={visualProductCandidates}
-          visualProductCandidatesLoading={visualProductCandidatesLoading}
-          visualProductCandidatesError={visualProductCandidatesError}
-          theme={theme}
-          text={text}
-          isMobile={isMobile}
-          isDark={isDark}
-        />
-        <ConceptIntentBlock
-          semanticDraft={semanticDraft}
-          theme={theme}
-          text={text}
-          isMobile={isMobile}
-          onConceptIntentSubmit={onConceptIntentSubmit}
-          isConceptIntentProcessing={isConceptIntentProcessing}
-          conceptIntentError={conceptIntentError}
-          conceptIntentSuccess={conceptIntentSuccess}
-          conceptIntentResultVisualId={conceptIntentResultVisualId}
-          onAnalyzeConceptResult={onAnalyzeConceptResult}
-        />
       </div>
     );
   }
@@ -1359,6 +1351,16 @@ export function VisionAnalysisPanel({
       <ConceptDNASection styleConsistency={semanticDraft.styleConsistency} theme={theme} text={text} isMobile={isMobile} />
       <SceneSpatialMapSection sceneGraph={semanticDraft.sceneGraph} theme={theme} text={text} isMobile={isMobile} />
       <EditableElementsSection editableObjects={semanticDraft.editableObjects} theme={theme} text={text} isMobile={isMobile} />
+      <VisualProductDiscoveryBlock
+        showVisualProductDiscovery={showVisualProductDiscovery}
+        visualProductCandidates={visualProductCandidates}
+        visualProductCandidatesLoading={visualProductCandidatesLoading}
+        visualProductCandidatesError={visualProductCandidatesError}
+        theme={theme}
+        text={text}
+        isMobile={isMobile}
+        isDark={isDark}
+      />
       <ConceptIntentBlock
         semanticDraft={semanticDraft}
         theme={theme}
@@ -1370,16 +1372,6 @@ export function VisionAnalysisPanel({
         conceptIntentSuccess={conceptIntentSuccess}
         conceptIntentResultVisualId={conceptIntentResultVisualId}
         onAnalyzeConceptResult={onAnalyzeConceptResult}
-      />
-      <VisualProductDiscoveryBlock
-        showVisualProductDiscovery={showVisualProductDiscovery}
-        visualProductCandidates={visualProductCandidates}
-        visualProductCandidatesLoading={visualProductCandidatesLoading}
-        visualProductCandidatesError={visualProductCandidatesError}
-        theme={theme}
-        text={text}
-        isMobile={isMobile}
-        isDark={isDark}
       />
       <BudgetDraftSection
         budgetDraft={budgetDraft}

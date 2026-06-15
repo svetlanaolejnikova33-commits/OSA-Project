@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { sumPreviewBudgetRows } from "../lib/registry/buildPreviewBudgetRows";
 
 function asArray(value) {
@@ -11,6 +12,8 @@ function formatPrice(value) {
   if (!Number.isFinite(num)) return "—";
   return `${num.toLocaleString("ru-RU")} ₽`;
 }
+
+const THUMB_SIZE = 84;
 
 function cardStyle(isDark) {
   return {
@@ -41,7 +44,60 @@ function linkStyle(isDark) {
   };
 }
 
-export function SkuMatchesSection({ budgetDraft, isDark }) {
+const thumbFrameStyle = (isDark) => ({
+  width: `${THUMB_SIZE}px`,
+  height: `${THUMB_SIZE}px`,
+  minWidth: `${THUMB_SIZE}px`,
+  minHeight: `${THUMB_SIZE}px`,
+  aspectRatio: "1 / 1",
+  borderRadius: "10px",
+  flexShrink: 0,
+  overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
+  background: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.9)",
+});
+
+function ProductThumb({ imageUrl, alt, isDark }) {
+  if (!imageUrl) {
+    return (
+      <div style={thumbFrameStyle(isDark)}>
+        <span
+          style={{
+            fontSize: "10px",
+            lineHeight: 1.35,
+            textAlign: "center",
+            padding: "6px",
+            color: isDark ? "rgba(243,238,231,0.55)" : "rgba(110,106,102,0.78)",
+          }}
+        >
+          Нет фото
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={thumbFrameStyle(isDark)}>
+      <img
+        src={imageUrl}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          display: "block",
+        }}
+      />
+    </div>
+  );
+}
+
+export const SkuMatchesSection = memo(function SkuMatchesSection({ budgetDraft, isDark }) {
   if (!budgetDraft) return null;
 
   const rows = asArray(budgetDraft?.previewBudgetRows);
@@ -58,6 +114,7 @@ export function SkuMatchesSection({ budgetDraft, isDark }) {
             marginBottom: 0,
             fontSize: "13px",
             lineHeight: 1.5,
+            minHeight: "52px",
             color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
           }}
         >
@@ -90,41 +147,11 @@ export function SkuMatchesSection({ budgetDraft, isDark }) {
                   }}
                 >
                   <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    {row.imageUrl ? (
-                      <img
-                        src={row.imageUrl}
-                        alt={row.productName || row.article || "Товар"}
-                        style={{
-                          width: "84px",
-                          height: "84px",
-                          objectFit: "cover",
-                          borderRadius: "10px",
-                          flexShrink: 0,
-                          border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
-                          background: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.9)",
-                        }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: "84px",
-                          height: "84px",
-                          borderRadius: "10px",
-                          flexShrink: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          textAlign: "center",
-                          padding: "6px",
-                          fontSize: "10px",
-                          lineHeight: 1.35,
-                          color: isDark ? "rgba(243,238,231,0.55)" : "rgba(110,106,102,0.78)",
-                          border: isDark ? "1px dashed rgba(255,255,255,0.16)" : "1px dashed rgba(0,0,0,0.12)",
-                        }}
-                      >
-                        Нет фото
-                      </div>
-                    )}
+                    <ProductThumb
+                      imageUrl={row.imageUrl}
+                      alt={row.productName || row.article || "Товар"}
+                      isDark={isDark}
+                    />
 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600 }}>{row.brand || "—"}</div>
@@ -159,7 +186,7 @@ export function SkuMatchesSection({ budgetDraft, isDark }) {
                     </div>
                   ) : null}
 
-                  <div style={{ marginTop: "10px" }}>
+                  <div style={{ marginTop: "10px", minHeight: "18px" }}>
                     {row.imageUrl && sourceUrl ? (
                       <a href={sourceUrl} target="_blank" rel="noreferrer" style={linkStyle(isDark)}>
                         Открыть источник
@@ -201,4 +228,4 @@ export function SkuMatchesSection({ budgetDraft, isDark }) {
       )}
     </div>
   );
-}
+});

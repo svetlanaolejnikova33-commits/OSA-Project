@@ -1,5 +1,7 @@
 "use client";
 
+import { memo, useMemo } from "react";
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -48,7 +50,23 @@ function sortGroups(groups) {
   });
 }
 
-export function SupplierMatchesSection({
+const emptyMessageStyle = (isDark) => ({
+  fontSize: "13px",
+  lineHeight: 1.5,
+  minHeight: "52px",
+  color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+});
+
+const sectionTitleStyle = (isDark) => ({
+  fontSize: "11px",
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+  fontWeight: 600,
+  margin: "0 0 10px 2px",
+  color: isDark ? "rgba(243,238,231,0.55)" : "rgba(110,106,102,0.85)",
+});
+
+export const SupplierMatchesSection = memo(function SupplierMatchesSection({
   budgetDraft,
   isDark,
   isMobile = false,
@@ -58,18 +76,19 @@ export function SupplierMatchesSection({
   displayMode = "chips",
   onlyWithBrands = false,
 }) {
-  const groups = sortGroups(
-    onlyWithBrands
+  const groups = useMemo(() => {
+    const source = onlyWithBrands
       ? asArray(budgetDraft?.normalizedSpecGroups).filter(
           (entry) => asArray(entry?.supplierCandidates?.matchedBrands).length > 0
         )
-      : asArray(budgetDraft?.normalizedSpecGroups)
-  );
+      : asArray(budgetDraft?.normalizedSpecGroups);
+    return sortGroups(source);
+  }, [budgetDraft?.normalizedSpecGroups, onlyWithBrands]);
 
   if (!budgetDraft) {
     return (
       <div style={cardStyle(isDark)}>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)" }}>
+        <div style={emptyMessageStyle(isDark)}>
           Создайте черновик сметы, чтобы увидеть поставщиков из реестра.
         </div>
       </div>
@@ -79,7 +98,7 @@ export function SupplierMatchesSection({
   if (!groups.length) {
     return (
       <div style={cardStyle(isDark)}>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)" }}>
+        <div style={emptyMessageStyle(isDark)}>
           {onlyWithBrands
             ? "Поставщики из реестра пока не найдены. Проверьте группы освещения в анализе."
             : "Категории сметы пока не сформированы."}
@@ -90,23 +109,10 @@ export function SupplierMatchesSection({
 
   return (
     <div>
-      {title ? (
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            fontWeight: 600,
-            margin: "0 0 10px 2px",
-            color: isDark ? "rgba(243,238,231,0.55)" : "rgba(110,106,102,0.85)",
-          }}
-        >
-          {title}
-        </div>
-      ) : null}
+      {title ? <div style={sectionTitleStyle(isDark)}>{title}</div> : null}
 
       {showReadiness && supplierIntelligence ? (
-        <div style={{ ...cardStyle(isDark), marginBottom: "12px" }}>
+        <div style={{ ...cardStyle(isDark), marginBottom: "12px", minHeight: "52px" }}>
           <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "6px" }}>
             Категории: {supplierIntelligence.categoryCount}
           </div>
@@ -122,9 +128,7 @@ export function SupplierMatchesSection({
           const categoryName = categoryTitle(entry);
           const categoryHint = categorySubtitle(entry);
           const brandLabel =
-            matchedBrands.length === 1
-              ? "1 бренд найден"
-              : `${matchedBrands.length} брендов найдено`;
+            matchedBrands.length === 1 ? "1 бренд найден" : `${matchedBrands.length} брендов найдено`;
           return (
             <div
               key={`${entry.registryCategoryId}-${entry.sourceText || categoryName}`}
@@ -188,4 +192,4 @@ export function SupplierMatchesSection({
       </div>
     </div>
   );
-}
+});

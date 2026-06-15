@@ -29,13 +29,13 @@ export function PlatformHeroBanner({
       : integrated
         ? isMobile
           ? "8px 12px 22px 12px"
-          : "20px 24px 32px 24px"
+          : "28px 28px 44px 28px"
         : isMobile
           ? "8px 12px 22px 12px"
           : "16px 16px 36px 16px",
     boxSizing: "border-box",
     textAlign: "center",
-    animation: compact ? undefined : "osaHeroEnter 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both",
+    animation: undefined,
     background: "transparent",
     borderBottom: integrated && !compact && !isMobile
       ? isDark
@@ -53,7 +53,7 @@ export function PlatformHeroBanner({
       : workspaceNarrow
         ? "clamp(76px, 9.5vw, 96px)"
         : integrated
-          ? "clamp(100px, 10vw, 128px)"
+          ? "clamp(120px, 12vw, 154px)"
           : "clamp(80px, 8.5vw, 100px)";
 
   const titleStyle = {
@@ -64,7 +64,7 @@ export function PlatformHeroBanner({
       : isMobile
         ? "clamp(1.25rem, 5vw, 1.6rem)"
         : integrated
-          ? "clamp(2rem, 3.6vw, 2.75rem)"
+          ? "clamp(2.45rem, 4.4vw, 3.35rem)"
           : "clamp(1.65rem, 3vw, 2.2rem)",
     lineHeight: 1.16,
     fontWeight: isDark ? "600" : "650",
@@ -157,8 +157,8 @@ export function PlatformHeroBanner({
         : "rgba(110,106,102,0.65)",
     background: active
       ? isDark
-        ? "rgba(255,255,255,0.08)"
-        : "rgba(0,0,0,0.05)"
+        ? "rgba(183,157,138,0.12)"
+        : "rgba(183,157,138,0.10)"
       : "transparent",
     transition: "background 0.2s ease, color 0.2s ease",
   });
@@ -169,10 +169,10 @@ export function PlatformHeroBanner({
         style={{
           position: "relative",
           display: "flex",
-          flexDirection: compact ? "row" : "column",
+          flexDirection: "column",
           alignItems: "center",
-          justifyContent: compact ? "center" : "center",
-          gap: compact ? "10px" : "0",
+          justifyContent: "center",
+          gap: compact ? "6px" : "0",
           width: "100%",
           zIndex: 1,
         }}
@@ -195,7 +195,7 @@ export function PlatformHeroBanner({
               : "drop-shadow(0 4px 12px rgba(43,43,43,0.08))",
           }}
         />
-        <div style={{ flex: compact ? "0 1 auto" : undefined, minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
           {!compact ? (
             <div style={badgeStyle}>
               <span>OSA</span>

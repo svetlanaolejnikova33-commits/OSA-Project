@@ -88,7 +88,19 @@ export function ConceptIntentSection({
             lineHeight: 1,
           }}
         >
-          🎙
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            aria-hidden
+          >
+            <circle cx="12" cy="12" r="7.5" />
+            <path d="M12 9v6M9.5 10.5v3M14.5 10.5v3" />
+          </svg>
         </button>
       </div>
 

@@ -1,7 +1,11 @@
 "use client";
 
-export function ProjectProgress({ steps, isDark }) {
-  if (!Array.isArray(steps) || !steps.length) return null;
+import { memo } from "react";
+
+export const ProjectProgress = memo(function ProjectProgress({ steps, isDark }) {
+  if (!Array.isArray(steps) || !steps.length) {
+    return <div style={{ minHeight: "88px" }} aria-hidden />;
+  }
 
   return (
     <div
@@ -9,6 +13,7 @@ export function ProjectProgress({ steps, isDark }) {
         display: "grid",
         gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
         gap: "8px",
+        minHeight: "88px",
       }}
     >
       {steps.map((step) => (
@@ -47,4 +52,4 @@ export function ProjectProgress({ steps, isDark }) {
       ))}
     </div>
   );
-}
+});

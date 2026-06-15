@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   getBudgetCategories,
   getMaterialHighlights,
@@ -17,6 +18,8 @@ import { ResponsiveSection } from "../ResponsiveSection";
 import { SkuMatchesSection } from "../SkuMatchesSection";
 import { SupplierMatchesSection } from "../SupplierMatchesSection";
 
+const SIDEBAR_EMPTY_MIN_HEIGHT = "52px";
+
 function sectionTitleStyle(isDark) {
   return {
     fontSize: "11px",
@@ -28,11 +31,10 @@ function sectionTitleStyle(isDark) {
   };
 }
 
-function PaletteSwatches({ palette, isDark }) {
-  const entries = [...(palette?.dominant || []), ...(palette?.accents || [])].slice(0, 8);
+const PaletteSwatches = memo(function PaletteSwatches({ entries, isDark }) {
   if (!entries.length) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }} className="osa-palette-swatches">
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", minHeight: "28px" }} className="osa-palette-swatches">
       {entries.map((entry, index) => (
         <div
           key={`${entry.hex || "color"}-${index}`}
@@ -43,14 +45,72 @@ function PaletteSwatches({ palette, isDark }) {
             borderRadius: "8px",
             background: entry.hex || "transparent",
             border: isDark ? "1px solid rgba(255,255,255,0.14)" : "1px solid rgba(0,0,0,0.08)",
+            flexShrink: 0,
           }}
         />
       ))}
     </div>
   );
+});
+
+function ConceptDNABlock({ conceptSummary, isMobile }) {
+  if (isMobile) {
+    return (
+      <div style={{ fontSize: "13px", lineHeight: 1.55, minHeight: SIDEBAR_EMPTY_MIN_HEIGHT }}>
+        <div style={{ marginBottom: "6px" }}>
+          <span style={{ opacity: 0.55 }}>Стиль · </span>
+          {conceptSummary.style}
+        </div>
+        <div style={{ marginBottom: "6px" }}>
+          <span style={{ opacity: 0.55 }}>Палитра · </span>
+          {conceptSummary.palette}
+        </div>
+        <div>
+          <span style={{ opacity: 0.55 }}>Материалы · </span>
+          {conceptSummary.materials}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: SIDEBAR_EMPTY_MIN_HEIGHT }}>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Стиль: {conceptSummary.style}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Палитра: {conceptSummary.palette}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Материалы: {conceptSummary.materials}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
+        Сохраняемых элементов: {conceptSummary.preservationCount}
+      </div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5 }}>Значимых правок: {conceptSummary.highImpactEditsCount}</div>
+    </div>
+  );
 }
 
-export function ProjectSidebar({
+function SceneGraphBlock({ sceneGraphSummary, editableSummary, isMobile }) {
+  if (isMobile) {
+    return (
+      <div style={{ fontSize: "13px", lineHeight: 1.55, minHeight: SIDEBAR_EMPTY_MIN_HEIGHT }}>
+        {sceneGraphSummary.zoneCount} зон · {sceneGraphSummary.objectCount} объектов · {editableSummary.total} редактируемых
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: SIDEBAR_EMPTY_MIN_HEIGHT }}>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Зоны: {sceneGraphSummary.zoneCount}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Объекты: {sceneGraphSummary.objectCount}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Редактируемые: {sceneGraphSummary.editableCount}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
+        Для сметы: {sceneGraphSummary.budgetRelevantCount}
+      </div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Элементов: {editableSummary.total}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>Безопасных: {editableSummary.highSafety}</div>
+      <div style={{ fontSize: "13px", lineHeight: 1.5 }}>Рискованных: {editableSummary.risky}</div>
+    </div>
+  );
+}
+
+export const ProjectSidebar = memo(function ProjectSidebar({
   semanticDraft,
   budgetDraft,
   isDark,
@@ -58,44 +118,88 @@ export function ProjectSidebar({
   isRunning,
   analysisDocumentSaved,
 }) {
-  const snapshot = getProjectSnapshot(semanticDraft);
-  const palette = getSidebarPalette(semanticDraft);
-  const materials = getMaterialHighlights(semanticDraft);
-  const categories = getBudgetCategories(semanticDraft, budgetDraft);
-  const progress = getProjectProgressSteps(semanticDraft);
-  const supplierIntelligence = getSupplierIntelligence(semanticDraft, budgetDraft);
-  const sceneGraphSummary = getSceneGraphSummary(semanticDraft?.sceneGraph);
-  const editableSummary = getEditableObjectsSummary(semanticDraft?.editableObjects);
-  const conceptSummary = getConceptDNASummary(semanticDraft?.styleConsistency, semanticDraft?.editableObjects);
+  const snapshot = useMemo(() => getProjectSnapshot(semanticDraft), [semanticDraft]);
+  const palette = useMemo(() => getSidebarPalette(semanticDraft), [semanticDraft]);
+  const materials = useMemo(() => getMaterialHighlights(semanticDraft), [semanticDraft]);
+  const categories = useMemo(
+    () => getBudgetCategories(semanticDraft, budgetDraft),
+    [semanticDraft, budgetDraft]
+  );
+  const progress = useMemo(() => getProjectProgressSteps(semanticDraft), [semanticDraft]);
+  const supplierIntelligence = useMemo(
+    () => getSupplierIntelligence(semanticDraft, budgetDraft),
+    [semanticDraft, budgetDraft]
+  );
+  const sceneGraphSummary = useMemo(
+    () => getSceneGraphSummary(semanticDraft?.sceneGraph),
+    [semanticDraft?.sceneGraph]
+  );
+  const editableSummary = useMemo(
+    () => getEditableObjectsSummary(semanticDraft?.editableObjects),
+    [semanticDraft?.editableObjects]
+  );
+  const conceptSummary = useMemo(
+    () => getConceptDNASummary(semanticDraft?.styleConsistency, semanticDraft?.editableObjects),
+    [semanticDraft?.styleConsistency, semanticDraft?.editableObjects]
+  );
+  const paletteEntries = useMemo(
+    () => [...(palette.dominant || []), ...(palette.accents || [])].slice(0, 8),
+    [palette.dominant, palette.accents]
+  );
+  const statusLabel = isRunning ? "Анализ выполняется…" : snapshot.status;
+
+  const titleBase = useMemo(() => sectionTitleStyle(isDark), [isDark]);
+  const paletteTitleStyle = useMemo(() => ({ ...titleBase, marginTop: "4px" }), [titleBase]);
+  const skuTitleStyle = useMemo(() => ({ ...titleBase, marginTop: "12px" }), [titleBase]);
+  const sectionTitleSpaced = useMemo(() => ({ ...titleBase, marginTop: "16px" }), [titleBase]);
+
+  const cardStyle = useMemo(
+    () => ({
+      padding: isMobile ? "0" : "12px",
+      borderRadius: isMobile ? 0 : "16px",
+      marginBottom: isMobile ? "0" : "16px",
+      border: isMobile ? "none" : isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+      background: isMobile ? "transparent" : isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
+    }),
+    [isDark, isMobile]
+  );
 
   return (
-    <div>
-      <div style={sectionTitleStyle(isDark)}>Project Sidebar</div>
-
-      {!analysisDocumentSaved ? (
-        <div
-          style={{
-            padding: "12px",
-            borderRadius: "16px",
-            marginBottom: "16px",
-            border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-            background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
-            fontSize: "13px",
-            lineHeight: 1.5,
-            color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.88)",
-          }}
-        >
-          Текущий анализ ещё не сохранён
-        </div>
-      ) : null}
+    <div className="osa-project-sidebar">
+      {!isMobile ? <div style={titleBase}>Project Sidebar</div> : null}
 
       <div
         style={{
-          padding: "12px",
-          borderRadius: "16px",
+          minHeight: analysisDocumentSaved ? 0 : "48px",
+          marginBottom: analysisDocumentSaved ? 0 : "16px",
+        }}
+      >
+        {!analysisDocumentSaved ? (
+          <div
+            style={{
+              padding: "12px",
+              borderRadius: isMobile ? "12px" : "16px",
+              border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+              background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
+              fontSize: "13px",
+              lineHeight: 1.5,
+              color: isDark ? "rgba(243,238,231,0.72)" : "rgba(110,106,102,0.88)",
+            }}
+          >
+            Текущий анализ ещё не сохранён
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          padding: isMobile ? "0 0 12px 0" : "12px",
+          borderRadius: isMobile ? 0 : "16px",
           marginBottom: "16px",
-          border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-          background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
+          border: isMobile ? "none" : isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
+          borderBottom: isMobile ? (isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid rgba(0,0,0,0.04)") : undefined,
+          background: isMobile ? "transparent" : isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
+          minHeight: "72px",
         }}
       >
         <div style={{ fontSize: "15px", fontWeight: 600, lineHeight: 1.35, marginBottom: "8px" }}>
@@ -115,10 +219,11 @@ export function ProjectSidebar({
           style={{
             fontSize: "12px",
             lineHeight: 1.45,
+            minHeight: "18px",
             color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
           }}
         >
-          {isRunning ? "Анализ выполняется…" : snapshot.status}
+          {statusLabel}
         </div>
       </div>
 
@@ -128,59 +233,64 @@ export function ProjectSidebar({
           isDark={isDark}
           isMobile={isMobile}
           title="Найденные поставщики"
-          showReadiness
+          showReadiness={!isMobile}
           supplierIntelligence={supplierIntelligence}
           displayMode="list"
         />
-        {budgetDraft ? (
-          <div style={{ marginTop: "12px" }}>
+        {budgetDraft && !isMobile ? (
+          <div style={{ marginTop: "12px", minHeight: "88px" }}>
             <ProjectProgress steps={supplierIntelligence.readiness} isDark={isDark} />
           </div>
         ) : null}
-        <SkuMatchesSection budgetDraft={budgetDraft} isDark={isDark} />
+        {isMobile ? (
+          <ResponsiveSection title="Подобранные позиции" titleStyle={skuTitleStyle} isMobile={isMobile} defaultOpen={false}>
+            <SkuMatchesSection budgetDraft={budgetDraft} isDark={isDark} />
+          </ResponsiveSection>
+        ) : (
+          <SkuMatchesSection budgetDraft={budgetDraft} isDark={isDark} />
+        )}
       </div>
 
-      <ResponsiveSection
-        title="Extracted palette"
-        titleStyle={{ ...sectionTitleStyle(isDark), marginTop: "4px" }}
-        isMobile={isMobile}
-      >
-        {palette.dominant.length || palette.accents.length ? (
-          <>
-            <PaletteSwatches palette={palette} isDark={isDark} />
+      <ResponsiveSection title="Палитра" titleStyle={paletteTitleStyle} isMobile={isMobile} defaultOpen={!isMobile}>
+        <div style={{ minHeight: SIDEBAR_EMPTY_MIN_HEIGHT }}>
+          {paletteEntries.length ? (
+            <>
+              <PaletteSwatches entries={paletteEntries} isDark={isDark} />
+              <div
+                style={{
+                  marginTop: "8px",
+                  marginBottom: isMobile ? "0" : "16px",
+                  fontSize: "12px",
+                  color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
+                }}
+              >
+                {palette.source === "extracted" ? "Извлечена из изображения" : "Определена Vision"}
+              </div>
+            </>
+          ) : (
             <div
               style={{
-                marginTop: "8px",
-                marginBottom: "16px",
-                fontSize: "12px",
+                marginBottom: isMobile ? "0" : "16px",
+                fontSize: "13px",
+                lineHeight: 1.5,
                 color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
               }}
             >
-              {palette.source === "extracted" ? "Извлечена из изображения" : "Определена Vision"}
+              Палитра появится после анализа.
             </div>
-          </>
-        ) : (
-          <div
-            style={{
-              marginBottom: "16px",
-              fontSize: "13px",
-              lineHeight: 1.5,
-              color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
-            }}
-          >
-            Палитра появится после анализа.
-          </div>
-        )}
+          )}
+        </div>
       </ResponsiveSection>
 
-      <ResponsiveSection title="Ключевые материалы" titleStyle={sectionTitleStyle(isDark)} isMobile={isMobile}>
+      <ResponsiveSection title="Ключевые материалы" titleStyle={titleBase} isMobile={isMobile} defaultOpen={!isMobile}>
         <ProjectMaterials items={materials} isDark={isDark} />
       </ResponsiveSection>
 
       <ResponsiveSection
         title="Потенциальные категории сметы"
-        titleStyle={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}
+        titleStyle={sectionTitleSpaced}
         isMobile={isMobile}
+        defaultOpen={false}
       >
         <ProjectMaterials
           items={categories}
@@ -189,52 +299,27 @@ export function ProjectSidebar({
         />
       </ResponsiveSection>
 
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Concept DNA</div>
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "16px",
-          marginBottom: "16px",
-          border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-          background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
-        }}
-      >
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>style: {conceptSummary.style}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>palette: {conceptSummary.palette}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          materials: {conceptSummary.materials}
+      <ResponsiveSection title="Логика концепции" titleStyle={sectionTitleSpaced} isMobile={isMobile} defaultOpen={false}>
+        <div style={cardStyle}>
+          <ConceptDNABlock conceptSummary={conceptSummary} isMobile={isMobile} />
         </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          preservation count: {conceptSummary.preservationCount}
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5 }}>high impact edits: {conceptSummary.highImpactEditsCount}</div>
-      </div>
+      </ResponsiveSection>
 
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Scene Graph</div>
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "16px",
-          marginBottom: "16px",
-          border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.04)",
-          background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.55)",
-        }}
-      >
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>zones: {sceneGraphSummary.zoneCount}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>objects: {sceneGraphSummary.objectCount}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>editable: {sceneGraphSummary.editableCount}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          budget relevant: {sceneGraphSummary.budgetRelevantCount}
+      <ResponsiveSection title="Структура сцены" titleStyle={sectionTitleSpaced} isMobile={isMobile} defaultOpen={false}>
+        <div style={cardStyle}>
+          <SceneGraphBlock
+            sceneGraphSummary={sceneGraphSummary}
+            editableSummary={editableSummary}
+            isMobile={isMobile}
+          />
         </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>
-          Editable objects: {editableSummary.total}
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5, marginBottom: "4px" }}>High safety: {editableSummary.highSafety}</div>
-        <div style={{ fontSize: "13px", lineHeight: 1.5 }}>Risky: {editableSummary.risky}</div>
-      </div>
+      </ResponsiveSection>
 
-      <div style={{ ...sectionTitleStyle(isDark), marginTop: "16px" }}>Прогресс проекта</div>
-      <ProjectProgress steps={progress} isDark={isDark} />
+      <ResponsiveSection title="Готовность проекта" titleStyle={sectionTitleSpaced} isMobile={isMobile} defaultOpen={!isMobile}>
+        <div style={{ minHeight: "88px" }}>
+          <ProjectProgress steps={progress} isDark={isDark} />
+        </div>
+      </ResponsiveSection>
     </div>
   );
-}
+});
