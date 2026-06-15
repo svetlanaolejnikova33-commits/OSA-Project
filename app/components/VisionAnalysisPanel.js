@@ -10,6 +10,7 @@ import { VisualProductDiscoverySection } from "./VisualProductDiscoverySection";
 import { BudgetRecommendationsSection } from "./BudgetRecommendationsSection";
 import { ProjectSelectionSection } from "./ProjectSelectionSection";
 import { StructuredEstimateSection } from "./StructuredEstimateSection";
+import { DesignerNarrativePanel } from "./DesignerNarrativePanel";
 import { sumPreviewBudgetRows } from "../lib/registry/buildPreviewBudgetRows";
 import {
   ANALYSIS_MODE_LABELS_RU,
@@ -993,6 +994,9 @@ export function VisionAnalysisPanel({
   onAddToProjectSelection,
   onProjectSelectionStatusChange,
   activeProjectKey = "",
+  visualRecommendationRows = [],
+  visualRecommendationsLoading = false,
+  visualRecommendationsEmptyMessage = "",
 }) {
   if (!semanticDraft) return null;
 
@@ -1000,6 +1004,7 @@ export function VisionAnalysisPanel({
   const theme = withMobileTheme(getSafeAnalysisTheme(semanticDraft, isDark, analysisMode), isMobile);
   const text = valueStyle(theme, isMobile);
   const isCenterPlacement = placement === "center";
+  const isPipelinePlacement = placement === "pipeline";
   const isBudgetPlacement = placement === "budget";
   const showConceptIntent = isCenterPlacement;
   const showProductDiscovery = isCenterPlacement && showVisualProductDiscovery;
@@ -1036,6 +1041,9 @@ export function VisionAnalysisPanel({
         />
         <BudgetRecommendationsSection
           budgetDraft={budgetDraft}
+          recommendationRows={visualRecommendationRows}
+          recommendationsLoading={visualRecommendationsLoading}
+          recommendationsEmptyMessage={visualRecommendationsEmptyMessage}
           isDark={isDark}
           isMobile={isMobile}
           selectedProjectItems={selectedProjectItems}
@@ -1066,6 +1074,20 @@ export function VisionAnalysisPanel({
         activeMode={analysisMode}
         isMobile={isMobile}
       />
+    );
+  }
+
+  if (isPipelinePlacement) {
+    return (
+      <div className="osa-analysis-panel" style={{ width: "100%", textAlign: "left" }}>
+        <DesignerNarrativePanel
+          semanticDraft={semanticDraft}
+          analysisMode={analysisMode}
+          theme={theme}
+          text={text}
+          isMobile={isMobile}
+        />
+      </div>
     );
   }
 
