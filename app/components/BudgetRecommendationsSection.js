@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { sumPreviewBudgetRows } from "../lib/registry/buildPreviewBudgetRows";
+import { sumRecommendationRows } from "../lib/visualProductDiscovery";
 import { buildProjectSelectionItemId } from "../lib/projectSelectionStore";
 
 function asArray(value) {
@@ -181,6 +181,18 @@ function SkuProductCard({
                 {matchScore}%
               </span>
             ) : null}
+            {row.visualAnalogLabel ? (
+              <span
+                style={{
+                  fontSize: "10px",
+                  lineHeight: 1.35,
+                  color: isDark ? "rgba(243,238,231,0.48)" : "rgba(110,106,102,0.65)",
+                  fontStyle: "italic",
+                }}
+              >
+                {row.visualAnalogLabel}
+              </span>
+            ) : null}
           </div>
           <div
             style={{
@@ -297,6 +309,9 @@ function AlternativesBlock({
 
 export const BudgetRecommendationsSection = memo(function BudgetRecommendationsSection({
   budgetDraft,
+  recommendationRows = [],
+  recommendationsLoading = false,
+  recommendationsEmptyMessage = "",
   isDark,
   isMobile = false,
   selectedProjectItems = [],
@@ -305,7 +320,7 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
   if (!budgetDraft) return null;
 
   const selectionIdSet = new Set(asArray(selectedProjectItems).map((item) => item?.id).filter(Boolean));
-  const rows = asArray(budgetDraft.previewBudgetRows);
+  const rows = asArray(recommendationRows);
   const byCategory = groupRowsByCategory(rows);
   const primaries = [];
   const alternatives = [];
@@ -318,13 +333,23 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
     }
   }
 
-  const total = sumPreviewBudgetRows(rows);
+  const total = sumRecommendationRows(rows);
 
   return (
     <div style={{ marginTop: "16px" }}>
       <div style={sectionLabelStyle(isDark)}>Рекомендуемые позиции</div>
 
-      {!primaries.length ? (
+      {recommendationsLoading ? (
+        <div
+          style={{
+            fontSize: "13px",
+            lineHeight: 1.5,
+            color: isDark ? "rgba(243,238,231,0.58)" : "rgba(110,106,102,0.78)",
+          }}
+        >
+          Поиск визуальных аналогов…
+        </div>
+      ) : !primaries.length ? (
         <div
           style={{
             fontSize: "13px",
@@ -332,7 +357,7 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
             color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
           }}
         >
-          Рекомендуемые позиции ещё не подобраны.
+          {recommendationsEmptyMessage || "Визуальные аналоги пока не найдены"}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

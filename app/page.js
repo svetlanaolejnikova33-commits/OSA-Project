@@ -76,6 +76,7 @@ import {
   readProjectSelectionItems,
   updateProjectSelectionItemStatus,
 } from "./lib/projectSelectionStore";
+import { buildVisualRecommendationPipeline } from "./lib/visualProductDiscovery";
 import { useResponsiveLayout, rv } from "./lib/responsiveLayout";
 import {
   ensureStorageVersion,
@@ -1562,6 +1563,9 @@ export default function Home() {
   const [visualProductCandidates, setVisualProductCandidates] = useState([]);
   const [visualProductCandidatesLoading, setVisualProductCandidatesLoading] = useState(false);
   const [visualProductCandidatesError, setVisualProductCandidatesError] = useState("");
+  const [visualRecommendationRows, setVisualRecommendationRows] = useState([]);
+  const [visualRecommendationsLoading, setVisualRecommendationsLoading] = useState(false);
+  const [visualRecommendationsEmptyMessage, setVisualRecommendationsEmptyMessage] = useState("");
   const [demoFallbackNotice, setDemoFallbackNotice] = useState("");
 
   const [hasRestoredWorkspaceSession, setHasRestoredWorkspaceSession] = useState(false);
@@ -1581,6 +1585,7 @@ export default function Home() {
   const activeProjectMetaRef = useRef(null);
   const semanticDraftRef = useRef(null);
   const visualProductCandidatesRef = useRef([]);
+  const visualRecommendationRowsRef = useRef([]);
 
   useEffect(() => {
     semanticDraftRef.current = semanticDraft;
@@ -1589,6 +1594,10 @@ export default function Home() {
   useEffect(() => {
     visualProductCandidatesRef.current = visualProductCandidates;
   }, [visualProductCandidates]);
+
+  useEffect(() => {
+    visualRecommendationRowsRef.current = visualRecommendationRows;
+  }, [visualRecommendationRows]);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 180);
@@ -5471,6 +5480,50 @@ export default function Home() {
     setProjectSelectionVersion((value) => value + 1);
   };
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!semanticDraft?.specAnalysis) {
+      setVisualRecommendationRows([]);
+      setVisualRecommendationsLoading(false);
+      setVisualRecommendationsEmptyMessage("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setVisualRecommendationsLoading(true);
+    setVisualRecommendationsEmptyMessage("");
+
+    (async () => {
+      try {
+        const result = await buildVisualRecommendationPipeline(semanticDraft, {
+          budgetDraft: activeBudgetDraft,
+          imageBase64: selectedImageBase64,
+          mimeType: selectedImageMimeType || "image/png",
+          imagePublicUrl:
+            typeof selectedImagePreviewUrl === "string" && /^https?:\/\//i.test(selectedImagePreviewUrl)
+              ? selectedImagePreviewUrl
+              : "",
+        });
+        if (cancelled) return;
+        setVisualRecommendationRows(result.rows);
+        setVisualRecommendationsEmptyMessage(result.emptyMessage || "");
+      } catch (e) {
+        if (cancelled) return;
+        console.warn("OSA: visual recommendation pipeline failed", e);
+        setVisualRecommendationRows([]);
+        setVisualRecommendationsEmptyMessage("Визуальные аналоги пока не найдены");
+      } finally {
+        if (!cancelled) setVisualRecommendationsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [semanticDraft, activeBudgetDraft, budgetDraftsVersion, selectedImageBase64, selectedImageMimeType, selectedImagePreviewUrl]);
+
   persistWorkspaceSessionNowRef.current = () => {
     if (!hasRestoredWorkspaceSession) return;
     let pk =
@@ -5699,6 +5752,9 @@ export default function Home() {
               onAddToProjectSelection={handleAddToProjectSelection}
               onProjectSelectionStatusChange={handleProjectSelectionStatusChange}
               activeProjectKey={activeProjectKey || stableSessionProjectKeyRef.current || ""}
+              visualRecommendationRows={visualRecommendationRows}
+              visualRecommendationsLoading={visualRecommendationsLoading}
+              visualRecommendationsEmptyMessage={visualRecommendationsEmptyMessage}
             />
           ) : (
             <div style={{ opacity: 0.72 }}>Черновик сметы можно создать после анализа сцены.</div>
@@ -5784,6 +5840,9 @@ export default function Home() {
     isAnalyzeResultVisible,
     activeBudgetDraft,
     selectedProjectItems,
+    visualRecommendationRows,
+    visualRecommendationsLoading,
+    visualRecommendationsEmptyMessage,
     resultData,
     isGenerateResultVisible,
     aiFieldsGridStyle,
