@@ -5,12 +5,10 @@
 
 import { mapSpecToSupplierRegistry } from "./mapSpecToSupplierRegistry";
 import {
-  discoverMockRawResults,
-} from "./visualSearch/providers/mockCatalog";
-import {
   extractVisualQuery,
   rankVisualCandidates as rankCatalogCandidates,
 } from "./visualProduct/rankVisualCandidates";
+import { logRecommendationPipelineTrace } from "./recommendationPipelineTrace";
 
 const VISUAL_TYPE_TO_REGISTRY_CATEGORY = {
   floor_lamp: "lighting.floor_lamps",
@@ -316,27 +314,23 @@ export async function discoverVisualCandidates({
     const rawResults = Array.isArray(payload?.results) ? payload.results : [];
 
     if (payload?.ok && rawResults.length) {
-      return rawResults.map((row, index) =>
-        normalizeVisualCandidate(
-          {
-            title: row.title,
-            productName: row.title,
-            brand: row.brand,
-            model: row.model,
-            imageUrl: row.imageUrl,
-            sourceUrl: row.sourceUrl,
-            productUrl: row.sourceUrl,
-            category: searchQuery?.category || "Освещение",
-            price: row.price,
-            visualMatchScore: row.visualMatchScore,
-            visualSimilarityPercent: row.visualSimilarityPercent ?? row.visualMatchScore,
-            sourceType: row.sourceType || SOURCE_TYPE.INTERNET,
-            providerMeta: row.providerMeta,
-            registryStatus: REGISTRY_STATUS.NOT_FOUND,
-          },
-          index,
-        ),
-      );
+      const registryBacked = rawResults.filter((row) => !isSyntheticProviderResult(row));
+      if (registryBacked.length) {
+        console.log("[REGISTRY-CATALOG] visual-search returned registry-backed results", {
+          count: registryBacked.length,
+          provider: payload?.provider,
+          mode,
+        });
+        return mapRawResultsToVisualCandidates(registryBacked, searchQuery);
+      }
+      if (!rawResults.some(isSyntheticProviderResult)) {
+        return mapRawResultsToVisualCandidates(rawResults, searchQuery);
+      }
+      console.warn("[REGISTRY-CATALOG] visual-search synthetic-only; retrying registry path", { mode });
+
+      const registryResults = await discoverVisualCandidatesLocalFallback(searchQuery, maxResults);
+      if (registryResults.length) return registryResults;
+      return mapRawResultsToVisualCandidates(rawResults, searchQuery);
     }
   } catch (error) {
     console.warn("OSA: visual-search request failed, trying mock provider route", error);
@@ -369,27 +363,18 @@ async function discoverVisualCandidatesViaApiMock({ semanticDraft, searchQuery, 
     const rawResults = Array.isArray(payload?.results) ? payload.results : [];
 
     if (payload?.ok && rawResults.length) {
-      return rawResults.map((row, index) =>
-        normalizeVisualCandidate(
-          {
-            title: row.title,
-            productName: row.title,
-            brand: row.brand,
-            model: row.model,
-            imageUrl: row.imageUrl,
-            sourceUrl: row.sourceUrl,
-            productUrl: row.sourceUrl,
-            category: searchQuery?.category || "Освещение",
-            price: row.price,
-            visualMatchScore: row.visualMatchScore,
-            visualSimilarityPercent: row.visualSimilarityPercent ?? row.visualMatchScore,
-            sourceType: row.sourceType || SOURCE_TYPE.INTERNET,
-            providerMeta: row.providerMeta,
-            registryStatus: REGISTRY_STATUS.NOT_FOUND,
-          },
-          index,
-        ),
-      );
+      const registryBacked = rawResults.filter((row) => !isSyntheticProviderResult(row));
+      if (registryBacked.length) {
+        return mapRawResultsToVisualCandidates(registryBacked, searchQuery);
+      }
+      if (!rawResults.some(isSyntheticProviderResult)) {
+        return mapRawResultsToVisualCandidates(rawResults, searchQuery);
+      }
+      console.warn("[REGISTRY-CATALOG] mock visual-search synthetic-only; using registry API fallback");
+
+      const registryResults = await discoverVisualCandidatesLocalFallback(searchQuery, limit);
+      if (registryResults.length) return registryResults;
+      return mapRawResultsToVisualCandidates(rawResults, searchQuery);
     }
   } catch (error) {
     console.warn("OSA: mock visual-search route failed", error);
@@ -405,8 +390,12 @@ function stripBase64Payload(value) {
   return comma >= 0 ? raw.slice(comma + 1).trim() : raw;
 }
 
-async function discoverVisualCandidatesLocalFallback(searchQuery, maxResults) {
-  const rawResults = await discoverMockRawResults(searchQuery, { limit: maxResults });
+function isSyntheticProviderResult(row) {
+  const meta = row?.providerMeta;
+  return Boolean(meta?.synthetic || meta?.source === "synthetic_fallback");
+}
+
+function mapRawResultsToVisualCandidates(rawResults, searchQuery) {
   return rawResults.map((row, index) =>
     normalizeVisualCandidate(
       {
@@ -421,18 +410,71 @@ async function discoverVisualCandidatesLocalFallback(searchQuery, maxResults) {
         price: row.price,
         visualMatchScore: row.visualMatchScore,
         visualSimilarityPercent: row.visualSimilarityPercent ?? row.visualMatchScore,
-        sourceType: SOURCE_TYPE.INTERNET,
-        registryStatus: REGISTRY_STATUS.NOT_FOUND,
+        sourceType: isSyntheticProviderResult(row) ? SOURCE_TYPE.INTERNET : SOURCE_TYPE.HYBRID,
+        providerMeta: row.providerMeta,
+        registryStatus: isSyntheticProviderResult(row)
+          ? REGISTRY_STATUS.NOT_FOUND
+          : REGISTRY_STATUS.SIMILAR,
       },
       index,
     ),
   );
 }
 
+async function discoverVisualCandidatesLocalFallback(searchQuery, maxResults) {
+  const registryCategoryId = asString(searchQuery?.registryCategoryId) || "lighting.pendants";
+
+  try {
+    const params = new URLSearchParams({
+      registryCategoryId,
+      limit: String(maxResults),
+    });
+    const response = await fetch(`/api/registry/modelux-catalog?${params}`);
+    const payload = await response.json().catch(() => ({}));
+    const products = Array.isArray(payload?.products) ? payload.products : [];
+
+    if (payload?.ok && products.length) {
+      const rawResults = products.map((row, index) => ({
+        id: `registry-catalog-${index}-${asString(row.productUrl).slice(0, 32)}`,
+        title: row.productName,
+        brand: inferBrandFromTitle(row.productName),
+        model: asString(row.sku) || "",
+        imageUrl: row.imageUrl || null,
+        sourceUrl: row.productUrl,
+        price: 0,
+        visualMatchScore: 0,
+        providerMeta: {
+          provider: "mock",
+          synthetic: false,
+          source: payload.registryPath || "modelux_registry_catalog",
+        },
+      }));
+
+      console.log("[REGISTRY-CATALOG] registry API fallback", {
+        count: rawResults.length,
+        registryCategoryId,
+        path: payload.registryPath || null,
+        first3: rawResults.slice(0, 3).map((r) => ({ brand: r.brand, title: r.title, sku: r.model })),
+      });
+
+      return mapRawResultsToVisualCandidates(rawResults, searchQuery);
+    }
+
+    console.warn("[REGISTRY-CATALOG] registry API fallback empty", {
+      registryCategoryId,
+      error: payload?.error || null,
+    });
+  } catch (error) {
+    console.warn("OSA: registry catalog API fallback failed", error);
+  }
+
+  return [];
+}
+
 /**
  * Rank visual candidates using semantic draft signals.
  */
-export function rankVisualCandidates(candidates, semanticDraft, { limit = 8 } = {}) {
+export function rankVisualCandidates(candidates, semanticDraft, { limit = 10 } = {}) {
   const list = asArray(candidates);
   if (!list.length) return [];
 
@@ -440,12 +482,18 @@ export function rankVisualCandidates(candidates, semanticDraft, { limit = 8 } = 
     productName: candidate.title,
     productUrl: candidate.sourceUrl,
     imageUrl: candidate.image,
+    imageAlt: candidate.imageAlt || candidate.title,
+    metadata: candidate.metadata || "",
   }));
 
   const ranked = rankCatalogCandidates(semanticDraft, catalogInput);
   const scoreByUrl = new Map(
-    ranked.map((row) => [asString(row.productUrl), row.visualMatchScore || 0])
+    ranked.map((row) => [asString(row.productUrl), row.visualMatchScore || 0]),
   );
+  const reasonsByUrl = new Map(
+    ranked.map((row) => [asString(row.productUrl), row.visualMatchReasons || []]),
+  );
+  const skuByUrl = new Map(ranked.map((row) => [asString(row.productUrl), row.sku || ""]));
 
   return list
     .map((candidate) => {
@@ -458,7 +506,9 @@ export function rankVisualCandidates(candidates, semanticDraft, { limit = 8 } = 
 
       return {
         ...candidate,
+        model: candidate.model || skuByUrl.get(asString(candidate.sourceUrl)) || candidate.model,
         semanticRankPercent: semanticRank,
+        visualMatchReasons: reasonsByUrl.get(asString(candidate.sourceUrl)) || [],
         visualMatchPercent: blendedScore,
       };
     })
@@ -608,6 +658,13 @@ export async function buildVisualRecommendationPipeline(
   const ranked = rankVisualCandidates(discovered, semanticDraft);
   const enriched = enrichCandidatesWithRegistry(ranked, { budgetDraft });
   const rows = visualCandidatesToRecommendationRows(enriched);
+
+  logRecommendationPipelineTrace({
+    query,
+    visualCandidates: discovered,
+    rankedCandidates: enriched,
+    recommendationRows: rows,
+  });
 
   return {
     query,

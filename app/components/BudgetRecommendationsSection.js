@@ -1,8 +1,13 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { sumRecommendationRows } from "../lib/visualProductDiscovery";
 import { buildProjectSelectionItemId } from "../lib/projectSelectionStore";
+import {
+  logPipelineTraceProducts,
+  logPipelineTraceSummary,
+  logPipelineTraceUi,
+} from "../lib/recommendationPipelineTrace";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -340,6 +345,51 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
   }
 
   const total = sumRecommendationRows(rows);
+
+  const traceRef = useRef("");
+  useEffect(() => {
+    const signature = JSON.stringify({
+      usingPreviewRows,
+      previewCount: previewRows.length,
+      recommendationCount: asArray(recommendationRows).length,
+      rowCount: rows.length,
+      primaryCount: primaries.length,
+      alternativeCount: alternatives.reduce((sum, entry) => sum + entry.rows.length, 0),
+    });
+    if (traceRef.current === signature) return;
+    traceRef.current = signature;
+
+    const productsTrace = logPipelineTraceProducts({
+      recommendationRows,
+      previewBudgetRows: previewRows,
+      usingPreviewRows,
+      meta: { component: "BudgetRecommendationsSection" },
+    });
+
+    const renderedCards = [
+      ...primaries.map((entry) => ({ role: "primary", row: entry.row })),
+      ...alternatives.flatMap((entry) => entry.rows.map((row) => ({ role: "alternative", row }))),
+    ];
+    logPipelineTraceUi({
+      recommendedProducts: productsTrace.recommendedProducts,
+      renderedCards,
+      meta: { component: "BudgetRecommendationsSection" },
+    });
+    logPipelineTraceSummary({
+      visualCandidatesCount: 0,
+      rankedCandidatesCount: 0,
+      recommendationRowsCount: asArray(recommendationRows).length,
+      recommendedProductsCount: rows.length,
+      renderedUICardsCount: renderedCards.length,
+    });
+  }, [
+    usingPreviewRows,
+    previewRows,
+    recommendationRows,
+    rows,
+    primaries,
+    alternatives,
+  ]);
 
   return (
     <div style={{ marginTop: "16px" }}>

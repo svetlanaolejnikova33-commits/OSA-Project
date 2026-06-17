@@ -54,6 +54,7 @@ import { fetchSkuMatchesForBudgetDraft } from "./lib/registry/fetchSkuMatchesFor
 import {
   fetchVisualProductCandidates,
   hasLightingPendantsCategory,
+  resolveRegistryCategoryIdFromSemanticDraft,
 } from "./lib/registry/fetchVisualProductCandidates";
 import { rankVisualCandidates } from "./lib/visualProduct/rankVisualCandidates";
 import {
@@ -77,6 +78,10 @@ import {
   updateProjectSelectionItemStatus,
 } from "./lib/projectSelectionStore";
 import { buildVisualRecommendationPipeline, logVisionFixDiagnostic } from "./lib/visualProductDiscovery";
+import {
+  logPipelineTraceProducts,
+  logPipelineTraceSummary,
+} from "./lib/recommendationPipelineTrace";
 import { logSemanticDraftRegressionDiagnostic } from "./lib/semanticDraftRegressionDiagnostic";
 import { logVisionClassificationDiagnostic } from "./lib/visionClassificationDiagnostic";
 import { useResponsiveLayout, rv } from "./lib/responsiveLayout";
@@ -2664,10 +2669,15 @@ export default function Home() {
     [semanticDraft],
   );
 
+  const visualRegistryCategoryId = useMemo(
+    () => resolveRegistryCategoryIdFromSemanticDraft(semanticDraft),
+    [semanticDraft],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
-    if (!semanticDraft || !showVisualProductDiscovery) {
+    if (!semanticDraft || !visualRegistryCategoryId) {
       if (visualProductCandidatesRef.current.length && semanticDraftRef.current) {
         devSessionLog("skip visual product candidate reset — semantic draft still active");
         return () => {
@@ -2695,7 +2705,7 @@ export default function Home() {
 
     (async () => {
       try {
-        const rawCandidates = await fetchVisualProductCandidates();
+        const rawCandidates = await fetchVisualProductCandidates({ semanticDraft });
         const candidates = rankVisualCandidates(semanticDraft, rawCandidates);
         if (!cancelled) {
           setVisualProductCandidates(candidates);
@@ -2717,7 +2727,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [semanticDraft, showVisualProductDiscovery]);
+  }, [semanticDraft, visualRegistryCategoryId]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -5519,6 +5529,25 @@ export default function Home() {
         if (cancelled) return;
         setVisualRecommendationRows(result.rows);
         setVisualRecommendationsEmptyMessage(result.emptyMessage || "");
+        logPipelineTraceProducts({
+          recommendationRows: result.rows,
+          previewBudgetRows: activeBudgetDraft?.previewBudgetRows || [],
+          usingPreviewRows:
+            Array.isArray(activeBudgetDraft?.previewBudgetRows) &&
+            activeBudgetDraft.previewBudgetRows.length > 0,
+          meta: { context: "after-buildVisualRecommendationPipeline" },
+        });
+        logPipelineTraceSummary({
+          visualCandidatesCount: result.candidates?.length || 0,
+          rankedCandidatesCount: result.candidates?.length || 0,
+          recommendationRowsCount: result.rows?.length || 0,
+          recommendedProductsCount:
+            Array.isArray(activeBudgetDraft?.previewBudgetRows) &&
+            activeBudgetDraft.previewBudgetRows.length > 0
+              ? activeBudgetDraft.previewBudgetRows.length
+              : result.rows?.length || 0,
+          renderedUICardsCount: 0,
+        });
       } catch (e) {
         if (cancelled) return;
         console.warn("OSA: visual recommendation pipeline failed", e);

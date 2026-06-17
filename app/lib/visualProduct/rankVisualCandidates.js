@@ -1,12 +1,14 @@
 import { mapSpecToSupplierRegistry } from "../mapSpecToSupplierRegistry";
 
-const VISUAL_CANDIDATE_LIMIT = 8;
+const VISUAL_CANDIDATE_LIMIT = 10;
 
 const TYPE_WEIGHT = 35;
 const STYLE_WEIGHT = 25;
 const MATERIAL_WEIGHT = 15;
 const COLOR_WEIGHT = 15;
 const ROOM_WEIGHT = 10;
+const FLOOR_LAMP_FEATURE_CAP = 45;
+const WRONG_FIXTURE_PENALTY_CAP = 60;
 
 const TYPE_SYNONYMS = {
   floor_lamp: [
@@ -17,6 +19,8 @@ const TYPE_SYNONYMS = {
     "floor lamp",
     "floor lamps",
     "напольн",
+    "napolnyi",
+    "napolny",
   ],
   подвесной: ["подвес", "подвесн", "pendant", "podves"],
   люстра: ["люстр", "chandelier", "lustra", "ceiling light"],
@@ -29,7 +33,31 @@ const STYLE_SYNONYMS = {
   classic: ["classic", "классик", "traditional", "неокласс"],
   scandi: ["scandi", "сканди", "nordic", "север"],
   loft: ["loft", "лофт", "industrial", "индустри"],
+  artdeco: ["art deco", "арт-деко", "арт деко", "ар-деко", "deco"],
 };
+
+const FLOOR_LAMP_FEATURE_BOOSTS = [
+  { tokens: ["торшер"], weight: 14, reason: "торшер в названии" },
+  { tokens: ["напольный светильник", "напольн", "napolnyi", "napolny"], weight: 12, reason: "напольный светильник" },
+  { tokens: ["floor lamp"], weight: 12, reason: "floor lamp" },
+  { tokens: ["gold", "золот", "golden"], weight: 10, reason: "золотая отделка" },
+  { tokens: ["brass", "латун", "бронз", "bronze"], weight: 10, reason: "латунь / brass" },
+  { tokens: ["абажур", "shade", "lampshade"], weight: 9, reason: "абажур" },
+  { tokens: ["ткан", "fabric", "textile", "linen", "бархат", "velvet"], weight: 8, reason: "тканевый абажур" },
+  { tokens: ["столик", "tray", "table"], weight: 5, reason: "столик / tray" },
+  { tokens: ["art deco", "арт-деко", "арт деко", "ар-деко"], weight: 8, reason: "арт-деко" },
+  { tokens: ["современ", "contemporary", "modern"], weight: 6, reason: "современный стиль" },
+  { tokens: ["warm", "тепл", "warm white"], weight: 4, reason: "тёплый свет" },
+  { tokens: ["slim", "тонк", "узк", "vertical", "вертикал"], weight: 4, reason: "тонкая вертикальная форма" },
+];
+
+const WRONG_FIXTURE_PENALTIES = [
+  { tokens: ["подвес", "pendant", "podves"], penalty: 45, reason: "подвесной (не торшер)" },
+  { tokens: ["люстр", "chandelier", "lustre"], penalty: 45, reason: "люстра" },
+  { tokens: ["потолоч", "ceiling mount", "ceiling lamp"], penalty: 40, reason: "потолочный" },
+  { tokens: ["настен", "бра", "sconce", "wall light", "wall lamp"], penalty: 40, reason: "настенный / бра" },
+  { tokens: ["треков", "track light", "track system"], penalty: 40, reason: "трековый" },
+];
 
 const MATERIAL_SYNONYMS = {
   metal: ["metal", "металл", "steel", "сталь", "алюмин", "alumin"],
@@ -66,6 +94,7 @@ const STYLE_REASON_LABELS = {
   classic: "классический стиль",
   scandi: "скандинавский стиль",
   loft: "лофт-стиль",
+  artdeco: "арт-деко",
 };
 
 const MATERIAL_REASON_LABELS = {
@@ -254,20 +283,66 @@ export function extractVisualQuery(semanticDraft) {
   };
 }
 
+function isFloorLampQuery(visualQuery) {
+  const types = visualQuery?.types?.length
+    ? visualQuery.types
+    : visualQuery?.type
+      ? [visualQuery.type]
+      : [];
+  return types.includes("floor_lamp");
+}
+
+function urlTokens(value) {
+  const raw = asString(value);
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return normalizeText(`${url.pathname} ${url.search}`.replace(/[/_-]+/g, " "));
+  } catch {
+    return normalizeText(raw.replace(/[/_-]+/g, " "));
+  }
+}
+
+function extractCandidateSku(candidate) {
+  const productName = asString(candidate?.productName);
+  const trailingCode = productName.match(/\b([A-Z]{1,4}\d{2,}[A-Z]{0,3})\b/i)?.[1];
+  if (trailingCode) return trailingCode.toUpperCase();
+
+  const urlSlug = asString(candidate?.productUrl).match(/\/product\/([^/?#]+)/i)?.[1];
+  if (urlSlug) return urlSlug.split("-").filter(Boolean).slice(-2).join("-").toUpperCase();
+
+  return "";
+}
+
 function enrichCandidateSignals(candidate) {
   const productName = asString(candidate?.productName);
   const text = normalizeText(productName);
-  const signals = [text, normalizeText(candidate?.productUrl)];
+  const signals = [
+    text,
+    normalizeText(candidate?.imageAlt),
+    normalizeText(candidate?.metadata),
+    urlTokens(candidate?.productUrl),
+    urlTokens(candidate?.imageUrl),
+  ];
 
   const finishMatch = productName.match(/(?:PL\s+)?([A-Z]{2})\s*$/i);
   const finish = finishMatch?.[1]?.toLowerCase() || "";
   if (finish === "bk") signals.push("black темная палитра");
   if (finish === "bs") signals.push("silver серебро metal металл brushed steel");
-  if (finish === "gd" || finish === "go") signals.push("gold золото brass латунь");
+  if (finish === "gd" || finish === "go") signals.push("gold золото brass латунь warm");
   if (finish === "wh" || finish === "wt") signals.push("white белая светлая палитра");
 
   if (/подвес|pendant|podves/i.test(productName)) {
     signals.push("подвесной pendant light");
+  }
+  if (/торшер|напольн|floor lamp|napolny/i.test(productName)) {
+    signals.push("торшер напольный светильник floor lamp");
+  }
+  if (/абажур|shade|ткан|fabric/i.test(productName)) {
+    signals.push("абажур shade fabric ткань textile");
+  }
+  if (/латун|brass|gold|золот/i.test(productName)) {
+    signals.push("brass латунь gold золото");
   }
   if (/modelight|modelux|model/i.test(productName)) {
     signals.push("modern contemporary metal металл");
@@ -338,6 +413,53 @@ function scoreRoomMatch(visualQuery, candidateText) {
   return { points: 0, reason: null };
 }
 
+function scoreFloorLampFeatureBoosts(candidateText) {
+  const reasons = [];
+  let points = 0;
+
+  for (const boost of FLOOR_LAMP_FEATURE_BOOSTS) {
+    if (!textMatchesAny(candidateText, boost.tokens)) continue;
+    points += boost.weight;
+    reasons.push(boost.reason);
+  }
+
+  return {
+    points: Math.min(points, FLOOR_LAMP_FEATURE_CAP),
+    reasons: uniqueList(reasons),
+  };
+}
+
+function scoreWrongFixturePenalties(visualQuery, candidateText) {
+  if (!isFloorLampQuery(visualQuery)) {
+    return { points: 0, reasons: [] };
+  }
+
+  const reasons = [];
+  let penalty = 0;
+
+  for (const rule of WRONG_FIXTURE_PENALTIES) {
+    if (!textMatchesAny(candidateText, rule.tokens)) continue;
+    penalty += rule.penalty;
+    reasons.push(rule.reason);
+  }
+
+  if (!penalty) {
+    return { points: 0, reasons: [] };
+  }
+
+  const hasFloorSignal = textMatchesAny(candidateText, TYPE_SYNONYMS.floor_lamp);
+  const cappedPenalty = Math.min(penalty, WRONG_FIXTURE_PENALTY_CAP);
+
+  if (!hasFloorSignal) {
+    return {
+      points: -100,
+      reasons: uniqueList([...reasons, "исключён: не торшер"]),
+    };
+  }
+
+  return { points: -cappedPenalty, reasons: uniqueList(reasons) };
+}
+
 function scoreCandidate(visualQuery, candidate) {
   const candidateText = candidateSearchText(candidate);
   const reasons = [];
@@ -375,18 +497,31 @@ function scoreCandidate(visualQuery, candidate) {
   const roomScore = scoreRoomMatch(visualQuery, candidateText);
   if (roomScore.reason) reasons.push(roomScore.reason);
 
-  const visualMatchScore = Math.min(
-    100,
+  let floorLampBoost = { points: 0, reasons: [] };
+  let wrongFixturePenalty = { points: 0, reasons: [] };
+
+  if (isFloorLampQuery(visualQuery)) {
+    floorLampBoost = scoreFloorLampFeatureBoosts(candidateText);
+    wrongFixturePenalty = scoreWrongFixturePenalties(visualQuery, candidateText);
+    reasons.push(...floorLampBoost.reasons);
+    reasons.push(...wrongFixturePenalty.reasons);
+  }
+
+  const rawScore =
     typeScore.points +
-      styleScore.points +
-      materialScore.points +
-      colorScore.points +
-      roomScore.points,
-  );
+    styleScore.points +
+    materialScore.points +
+    colorScore.points +
+    roomScore.points +
+    floorLampBoost.points +
+    wrongFixturePenalty.points;
+
+  const visualMatchScore = Math.max(0, Math.min(100, rawScore));
 
   return {
     visualMatchScore,
     visualMatchReasons: uniqueList(reasons),
+    sku: extractCandidateSku(candidate),
   };
 }
 
@@ -422,10 +557,12 @@ export function rankVisualCandidates(semanticDraft, visualProductCandidates) {
         productName: candidate.productName,
         imageUrl: candidate.imageUrl || null,
         productUrl: candidate.productUrl,
+        sku: scored.sku || extractCandidateSku(candidate),
         visualMatchScore: scored.visualMatchScore,
         visualMatchReasons: scored.visualMatchReasons,
       };
     })
+    .filter((row) => !isFloorLampQuery(visualQuery) || row.visualMatchScore > 0)
     .sort(compareCandidates)
     .slice(0, VISUAL_CANDIDATE_LIMIT);
 }
