@@ -76,7 +76,9 @@ import {
   readProjectSelectionItems,
   updateProjectSelectionItemStatus,
 } from "./lib/projectSelectionStore";
-import { buildVisualRecommendationPipeline } from "./lib/visualProductDiscovery";
+import { buildVisualRecommendationPipeline, logVisionFixDiagnostic } from "./lib/visualProductDiscovery";
+import { logSemanticDraftRegressionDiagnostic } from "./lib/semanticDraftRegressionDiagnostic";
+import { logVisionClassificationDiagnostic } from "./lib/visionClassificationDiagnostic";
 import { useResponsiveLayout, rv } from "./lib/responsiveLayout";
 import {
   ensureStorageVersion,
@@ -5366,11 +5368,17 @@ export default function Home() {
         extractedPalette,
         viewMode: selectedAnalysisMode,
       });
+      logSemanticDraftRegressionDiagnostic(nextDraft, {
+        analysisMode: selectedAnalysisMode,
+        rawFromApi: payload?.semanticDraft || null,
+        context: "analyze-image-complete-pre-registry",
+      });
       setActiveSavedAnalysisRecordId("");
       setSavedDocumentSnapshot("");
     setSemanticDraft(nextDraft);
     setResultAnalysisMode(selectedAnalysisMode);
     setDemoFallbackNotice("");
+    logVisionClassificationDiagnostic(nextDraft, { context: "analyze-image-complete" });
     window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
     scheduleBudgetDraftCreate();
 
@@ -5497,6 +5505,8 @@ export default function Home() {
 
     (async () => {
       try {
+        logVisionClassificationDiagnostic(semanticDraft, { context: "before-visual-pipeline" });
+        logVisionFixDiagnostic(semanticDraft);
         const result = await buildVisualRecommendationPipeline(semanticDraft, {
           budgetDraft: activeBudgetDraft,
           imageBase64: selectedImageBase64,

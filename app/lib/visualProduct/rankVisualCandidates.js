@@ -9,6 +9,15 @@ const COLOR_WEIGHT = 15;
 const ROOM_WEIGHT = 10;
 
 const TYPE_SYNONYMS = {
+  floor_lamp: [
+    "торшер",
+    "торшеры",
+    "напольный светильник",
+    "напольная лампа",
+    "floor lamp",
+    "floor lamps",
+    "напольн",
+  ],
   подвесной: ["подвес", "подвесн", "pendant", "podves"],
   люстра: ["люстр", "chandelier", "lustra", "ceiling light"],
   бра: ["бра", "sconce", "wall light", "настенн"],
@@ -45,6 +54,7 @@ const ROOM_SYNONYMS = {
 };
 
 const TYPE_REASON_LABELS = {
+  floor_lamp: "торшер",
   подвесной: "подвесной светильник",
   люстра: "люстра",
   бра: "бра",
@@ -155,6 +165,10 @@ function detectTypes(corpus) {
     if (textMatchesAny(text, synonyms)) detected.push(type);
   }
 
+  if (!detected.length && /lighting\.floor_lamps/i.test(text)) {
+    detected.push("floor_lamp");
+  }
+
   if (!detected.length && /lighting\.pendants|подвес/i.test(text)) {
     detected.push("подвесной");
   }
@@ -230,13 +244,13 @@ export function extractVisualQuery(semanticDraft) {
   const room = detectRoom(corpus);
 
   return {
-    type: types[0] || "подвесной",
+    type: types[0] || null,
     types,
     styles,
     materials,
     colors,
     room,
-    category: types[0] || "подвесной",
+    category: types[0] || null,
   };
 }
 
@@ -270,7 +284,11 @@ function candidateSearchText(candidate) {
 }
 
 function scoreTypeMatch(visualQuery, candidateText) {
-  const queryTypes = visualQuery.types?.length ? visualQuery.types : [visualQuery.type];
+  const queryTypes = visualQuery.types?.length
+    ? visualQuery.types
+    : visualQuery.type
+      ? [visualQuery.type]
+      : [];
   for (const type of queryTypes) {
     const synonyms = TYPE_SYNONYMS[type] || [];
     if (textMatchesAny(candidateText, synonyms)) {

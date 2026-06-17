@@ -3,6 +3,7 @@
  */
 
 import {
+  MODELUX_FLOOR_LAMPS_CATALOG_URL,
   MODELUX_PENDANTS_CATALOG_URL,
   parseModeluxCatalogHtml,
 } from "../../registry/parseModeluxCatalogHtml";
@@ -15,22 +16,67 @@ const FETCH_HEADERS = {
   "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
 };
 
+const MODELUX_CATALOG_BY_REGISTRY_CATEGORY = {
+  "lighting.pendants": MODELUX_PENDANTS_CATALOG_URL,
+  "lighting.floor_lamps": MODELUX_FLOOR_LAMPS_CATALOG_URL,
+};
+
+function resolveModeluxCatalogUrl(registryCategoryId) {
+  const id = asString(registryCategoryId);
+  return MODELUX_CATALOG_BY_REGISTRY_CATEGORY[id] || null;
+}
+
 /**
  * @returns {Promise<Array<{ productName: string, productUrl: string, imageUrl: string|null }>>}
  */
-export async function fetchModeluxCatalogProducts() {
-  const response = await fetch(MODELUX_PENDANTS_CATALOG_URL, {
-    headers: FETCH_HEADERS,
-    redirect: "follow",
-    next: { revalidate: 3600 },
-  });
+export async function fetchModeluxCatalogProducts({ registryCategoryId } = {}) {
+  const resolvedRegistryCategory = asString(registryCategoryId) || null;
+  const catalogUrl =
+    resolveModeluxCatalogUrl(registryCategoryId) || MODELUX_PENDANTS_CATALOG_URL;
+  const isFloorLampRoute = resolvedRegistryCategory === "lighting.floor_lamps";
 
-  if (!response.ok) {
-    throw new Error(`Modelux catalog fetch failed with status ${response.status}.`);
+  let httpStatus = 0;
+  let products = [];
+
+  try {
+    const response = await fetch(catalogUrl, {
+      headers: FETCH_HEADERS,
+      redirect: "follow",
+      next: { revalidate: 3600 },
+    });
+    httpStatus = response.status;
+
+    if (!response.ok) {
+      throw new Error(`Modelux catalog fetch failed with status ${response.status}.`);
+    }
+
+    const html = await response.text();
+    products = parseModeluxCatalogHtml(html, response.url || catalogUrl);
+  } finally {
+    if (isFloorLampRoute) {
+      const imageCount = products.filter((row) => Boolean(row?.imageUrl)).length;
+      const diagnostic = {
+        registryCategory: resolvedRegistryCategory,
+        catalogUrl,
+        httpStatus,
+        productCount: products.length,
+        imageCount,
+        firstTitles: products.slice(0, 5).map((row) => row.productName),
+        firstImageUrls: products.slice(0, 5).map((row) => row.imageUrl || null),
+      };
+      console.log("[FLOOR-LAMP-CATALOG]", {
+        registryCategory: diagnostic.registryCategory,
+        catalogUrl: diagnostic.catalogUrl,
+        httpStatus: diagnostic.httpStatus,
+        productCount: diagnostic.productCount,
+        imageCount: diagnostic.imageCount,
+      });
+      console.log("[FLOOR-LAMP-CATALOG] firstTitles:", diagnostic.firstTitles);
+      console.log("[FLOOR-LAMP-CATALOG] firstImageUrls:", diagnostic.firstImageUrls);
+    }
   }
 
-  const html = await response.text();
-  return parseModeluxCatalogHtml(html, response.url || MODELUX_PENDANTS_CATALOG_URL);
+  return products;
 }
 
 function asString(value) {
@@ -72,7 +118,9 @@ export function buildSyntheticMockResults(searchQuery, limit = 12) {
  */
 export async function discoverMockRawResults(searchQuery, { limit = 12 } = {}) {
   try {
-    const catalogRows = await fetchModeluxCatalogProducts();
+    const catalogRows = await fetchModeluxCatalogProducts({
+      registryCategoryId: searchQuery?.registryCategoryId,
+    });
     if (catalogRows.length) {
       return catalogRows.slice(0, limit).map((row, index) => ({
         id: stableId("mock-catalog", index, row.productUrl),

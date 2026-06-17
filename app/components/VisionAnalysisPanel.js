@@ -18,6 +18,10 @@ import {
   hasSemanticDraftForMode,
   normalizeAnalysisMode,
 } from "../lib/validateSemanticDraft";
+import {
+  buildCompactSemanticDisplay,
+  hasCompactSemanticDisplayContent,
+} from "../lib/buildCompactSemanticDisplay";
 
 const MATERIAL_GROUP_LABELS_RU = {
   floor: "Пол",
@@ -172,6 +176,53 @@ function formatConfidence(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return "";
   return `${Math.round(num * 100)}%`;
+}
+
+function SemanticStyleBlock({
+  semanticDraft,
+  analysisMode,
+  theme,
+  text,
+  isMobile = false,
+  confidence,
+  includeAtmosphere = true,
+  summaryMuted = false,
+}) {
+  const display = buildCompactSemanticDisplay(semanticDraft, analysisMode, { includeAtmosphere });
+  if (!hasCompactSemanticDisplayContent(display)) return null;
+
+  const confidenceSuffix = formatConfidence(confidence) ? ` · ${formatConfidence(confidence)}` : "";
+
+  return (
+    <>
+      {display.styleTitle ? (
+        <div style={{ ...text, marginBottom: display.styleSubtitle || display.chips.length ? "6px" : "8px" }}>
+          {display.styleTitle}
+          {confidenceSuffix}
+        </div>
+      ) : null}
+      {display.styleSubtitle ? (
+        <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary }}>{display.styleSubtitle}</div>
+      ) : null}
+      {display.chips.length ? (
+        <div style={{ marginBottom: display.summary ? "8px" : 0 }}>
+          <Chips items={display.chips} theme={theme} isMobile={isMobile} />
+        </div>
+      ) : null}
+      {display.summary ? (
+        <div
+          style={{
+            ...text,
+            color: summaryMuted ? theme.textSecondary : theme.text,
+            fontSize: summaryMuted ? "13px" : undefined,
+            lineHeight: summaryMuted ? 1.5 : undefined,
+          }}
+        >
+          {display.summary}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function Chips({ items, theme, isMobile = false }) {
@@ -895,13 +946,7 @@ function CompactAnalysisSummary({ semanticDraft, analysisMode, theme, text, isMo
   const pro = semanticDraft?.proAnalysis || {};
   const spec = semanticDraft?.specAnalysis || {};
   const mode = analysisMode;
-
-  const styleLine =
-    mode === "quick"
-      ? quick.styleAnalysis?.labelRu || quick.styleAnalysis?.primary || ""
-      : mode === "spec"
-        ? spec.styleAnalysis?.labelRu || spec.styleAnalysis?.primary || ""
-        : pro.styleAnalysis?.labelRu || pro.styleAnalysis?.primary || "";
+  const display = buildCompactSemanticDisplay(semanticDraft, mode, { includeAtmosphere: true });
 
   const spaceLine =
     mode === "quick"
@@ -910,14 +955,7 @@ function CompactAnalysisSummary({ semanticDraft, analysisMode, theme, text, isMo
         ? spec.spaceType?.labelRu || spec.spaceType?.value || ""
         : pro.spaceType?.labelRu || pro.spaceType?.value || "";
 
-  const summaryLine =
-    mode === "quick"
-      ? quick.designIntent?.summaryRu || ""
-      : mode === "spec"
-        ? spec.designIntent?.summaryRu || ""
-        : pro.designIntent?.summaryRu || "";
-
-  if (!styleLine && !spaceLine && !summaryLine) return null;
+  if (!spaceLine && !hasCompactSemanticDisplayContent(display)) return null;
 
   return (
     <div
@@ -933,10 +971,15 @@ function CompactAnalysisSummary({ semanticDraft, analysisMode, theme, text, isMo
       {spaceLine ? (
         <div style={{ ...text, fontSize: isMobile ? "14px" : "15px", fontWeight: 600 }}>{spaceLine}</div>
       ) : null}
-      {styleLine ? <div style={text}>{styleLine}</div> : null}
-      {summaryLine ? (
-        <div style={{ ...text, color: theme.textSecondary, fontSize: "13px", lineHeight: 1.5 }}>{summaryLine}</div>
-      ) : null}
+      <SemanticStyleBlock
+        semanticDraft={semanticDraft}
+        analysisMode={mode}
+        theme={theme}
+        text={text}
+        isMobile={isMobile}
+        includeAtmosphere
+        summaryMuted
+      />
     </div>
   );
 }
@@ -1186,15 +1229,17 @@ export function VisionAnalysisPanel({
             </div>
           </Section>
         ) : null}
-        {quick.styleAnalysis?.labelRu || quick.styleAnalysis?.primary ? (
+        {hasCompactSemanticDisplayContent(buildCompactSemanticDisplay(semanticDraft, "quick", { includeAtmosphere: false })) ? (
           <Section label="Стиль" theme={theme} isMobile={isMobile} sectionKey="style">
-            <div style={{ ...text, marginBottom: "8px" }}>
-              {quick.styleAnalysis.labelRu || quick.styleAnalysis.primary}
-              {formatConfidence(quick.styleAnalysis.confidence) ? ` · ${formatConfidence(quick.styleAnalysis.confidence)}` : ""}
-            </div>
-            {Array.isArray(quick.styleAnalysis.secondary) && quick.styleAnalysis.secondary.length ? (
-              <Chips items={quick.styleAnalysis.secondary} theme={theme} isMobile={isMobile} />
-            ) : null}
+            <SemanticStyleBlock
+              semanticDraft={semanticDraft}
+              analysisMode="quick"
+              theme={theme}
+              text={text}
+              isMobile={isMobile}
+              confidence={quick.styleAnalysis?.confidence}
+              includeAtmosphere={false}
+            />
           </Section>
         ) : null}
         {quick.atmosphereRu ? (
@@ -1215,17 +1260,19 @@ export function VisionAnalysisPanel({
             Профессиональная интерьерная карта
           </div>
         </Section>
-        {pro.designIntent?.summaryRu ||
+        {hasCompactSemanticDisplayContent(buildCompactSemanticDisplay(semanticDraft, "pro", { includeAtmosphere: false })) ||
         pro.designIntent?.emotionalEffectRu ||
         (Array.isArray(pro.designIntent?.keyDesignDrivers) && pro.designIntent.keyDesignDrivers.length) ? (
           <Section label="Стиль и замысел" theme={theme} isMobile={isMobile} sectionKey="style-intent">
-            {pro.styleAnalysis?.labelRu || pro.styleAnalysis?.primary ? (
-              <div style={{ ...text, marginBottom: "8px" }}>
-                {pro.styleAnalysis.labelRu || pro.styleAnalysis.primary}
-                {formatConfidence(pro.styleAnalysis.confidence) ? ` · ${formatConfidence(pro.styleAnalysis.confidence)}` : ""}
-              </div>
-            ) : null}
-            {pro.designIntent.summaryRu ? <div style={{ ...text, marginBottom: "8px" }}>{pro.designIntent.summaryRu}</div> : null}
+            <SemanticStyleBlock
+              semanticDraft={semanticDraft}
+              analysisMode="pro"
+              theme={theme}
+              text={text}
+              isMobile={isMobile}
+              confidence={pro.styleAnalysis?.confidence}
+              includeAtmosphere={false}
+            />
             {pro.designIntent.emotionalEffectRu ? (
               <div style={{ ...text, marginBottom: "8px", color: theme.textSecondary }}>{pro.designIntent.emotionalEffectRu}</div>
             ) : null}

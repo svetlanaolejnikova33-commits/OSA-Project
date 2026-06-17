@@ -320,7 +320,13 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
   if (!budgetDraft) return null;
 
   const selectionIdSet = new Set(asArray(selectedProjectItems).map((item) => item?.id).filter(Boolean));
-  const rows = asArray(recommendationRows);
+  const previewRows = asArray(budgetDraft.previewBudgetRows);
+  const usingPreviewRows = previewRows.length > 0;
+  const rows = usingPreviewRows ? previewRows : asArray(recommendationRows);
+  const showVisualSearchLoading = !usingPreviewRows && recommendationsLoading;
+  const emptyMessage = usingPreviewRows
+    ? "Рекомендуемые позиции ещё не подобраны."
+    : recommendationsEmptyMessage || "Визуальные аналоги пока не найдены";
   const byCategory = groupRowsByCategory(rows);
   const primaries = [];
   const alternatives = [];
@@ -339,7 +345,7 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
     <div style={{ marginTop: "16px" }}>
       <div style={sectionLabelStyle(isDark)}>Рекомендуемые позиции</div>
 
-      {recommendationsLoading ? (
+      {showVisualSearchLoading ? (
         <div
           style={{
             fontSize: "13px",
@@ -357,7 +363,7 @@ export const BudgetRecommendationsSection = memo(function BudgetRecommendationsS
             color: isDark ? "rgba(243,238,231,0.62)" : "rgba(110,106,102,0.82)",
           }}
         >
-          {recommendationsEmptyMessage || "Визуальные аналоги пока не найдены"}
+          {emptyMessage}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

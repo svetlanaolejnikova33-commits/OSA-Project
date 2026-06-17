@@ -4,6 +4,10 @@
  */
 
 import { ANALYSIS_MODE_LABELS_RU, normalizeAnalysisMode } from "./validateSemanticDraft";
+import {
+  buildCompactSemanticDisplay,
+  buildCompactSemanticDisplayText,
+} from "./buildCompactSemanticDisplay";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -109,42 +113,36 @@ function describeFocalElements(pro) {
   return "";
 }
 
-function buildStyleSection({ layer, quick, pro, spec }) {
-  const styleLabel =
-    asString(layer?.styleAnalysis?.labelRu) ||
-    asString(layer?.styleAnalysis?.primary) ||
-    asString(pro?.styleAnalysis?.labelRu) ||
-    asString(quick?.styleAnalysis?.labelRu) ||
-    asString(spec?.styleAnalysis?.labelRu);
-
-  const summary =
-    asString(layer?.designIntent?.summaryRu) ||
-    asString(pro?.designIntent?.summaryRu) ||
-    asString(quick?.designIntent?.summaryRu) ||
-    asString(spec?.designIntent?.summaryRu);
+function buildStyleSection({ mode, layer, quick, pro, spec }) {
+  const display = buildCompactSemanticDisplay(
+    { quickAnalysis: quick, proAnalysis: pro, specAnalysis: spec },
+    mode,
+    { includeAtmosphere: false },
+  );
 
   const emotional =
     asString(layer?.designIntent?.emotionalEffectRu) ||
     asString(pro?.designIntent?.emotionalEffectRu) ||
     asString(quick?.designIntent?.emotionalEffectRu);
 
-  const secondary = uniqueStrings([
-    ...asArray(layer?.styleAnalysis?.secondary),
-    ...asArray(pro?.styleAnalysis?.secondary),
+  const driverChips = uniqueStrings([
     ...asArray(layer?.designIntent?.keyDesignDrivers),
     ...asArray(pro?.designIntent?.keyDesignDrivers),
-  ]);
+  ]).filter((item) => !buildCompactSemanticDisplayText(display).toLowerCase().includes(item.toLowerCase()));
 
   const narrative = joinSentences([
-    styleLabel && summary ? `${styleLabel}. ${summary}` : styleLabel || summary,
+    [display.styleTitle, display.styleSubtitle].filter(Boolean).join(". "),
+    display.summary,
     emotional,
   ]);
+
+  const chips = uniqueStrings([...display.chips, ...driverChips]).slice(0, 6);
 
   return {
     id: "style-intent",
     title: "Стиль и замысел",
     narrative,
-    chips: secondary.slice(0, 5),
+    chips,
   };
 }
 

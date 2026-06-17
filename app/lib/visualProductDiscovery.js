@@ -12,6 +12,63 @@ import {
   rankVisualCandidates as rankCatalogCandidates,
 } from "./visualProduct/rankVisualCandidates";
 
+const VISUAL_TYPE_TO_REGISTRY_CATEGORY = {
+  floor_lamp: "lighting.floor_lamps",
+  подвесной: "lighting.pendants",
+  pendant: "lighting.pendants",
+  люстра: "lighting.chandeliers",
+  chandelier: "lighting.chandeliers",
+  бра: "lighting.wall_sconces",
+  wall_light: "lighting.wall_sconces",
+};
+
+const FIXTURE_TYPE_LABELS_RU = {
+  floor_lamp: "торшер",
+  подвесной: "подвесной светильник",
+  pendant: "подвесной светильник",
+  люстра: "люстра",
+  chandelier: "люстра",
+  бра: "бра",
+  wall_light: "бра",
+};
+
+const FIXTURE_TYPE_LABELS_EN = {
+  floor_lamp: "floor lamp",
+  подвесной: "pendant light",
+  pendant: "pendant light",
+  люстра: "chandelier",
+  chandelier: "chandelier",
+  бра: "wall sconce",
+  wall_light: "wall sconce",
+};
+
+export function resolveRegistryCategoryFromVisualType(visualType) {
+  const key = asString(visualType);
+  return key ? VISUAL_TYPE_TO_REGISTRY_CATEGORY[key] || null : null;
+}
+
+function fixtureLabelRu(visualType) {
+  const key = asString(visualType);
+  return key ? FIXTURE_TYPE_LABELS_RU[key] || "" : "";
+}
+
+function fixtureLabelEn(visualType) {
+  const key = asString(visualType);
+  return key ? FIXTURE_TYPE_LABELS_EN[key] || "" : "";
+}
+
+export function logVisionFixDiagnostic(semanticDraft) {
+  const visualQuery = extractVisualQuery(semanticDraft);
+  const searchQuery = buildVisualSearchQuery(semanticDraft, { languageMode: "ru" });
+  const payload = {
+    detectedType: visualQuery?.type || null,
+    registryCategory: searchQuery?.registryCategoryId || null,
+    finalSearchQuery: searchQuery?.primary || searchQuery?.ru || "",
+  };
+  console.log("[OSA-VISION-FIX]", payload);
+  return payload;
+}
+
 export const REGISTRY_STATUS = {
   CONFIRMED: "confirmed",
   SIMILAR: "similar",
@@ -66,10 +123,21 @@ function stableId(prefix, index, seed = "") {
   return `${prefix}-${index}-${asString(seed).slice(0, 48) || "item"}`;
 }
 
-function categoryLabelFromDraft(semanticDraft) {
+function resolveLightingRegistryCategoryFromDraft(semanticDraft) {
   const spec = semanticDraft?.specAnalysis || {};
   const { normalizedSpecGroups } = mapSpecToSupplierRegistry({ specAnalysis: spec });
   const lighting = normalizedSpecGroups.find((g) => g?.registryCategoryId?.startsWith("lighting"));
+  return asString(lighting?.registryCategoryId) || null;
+}
+
+function categoryLabelFromDraft(semanticDraft, visualType = null) {
+  const mappedRegistryId = resolveRegistryCategoryFromVisualType(visualType);
+  const spec = semanticDraft?.specAnalysis || {};
+  const { normalizedSpecGroups } = mapSpecToSupplierRegistry({ specAnalysis: spec });
+  const lighting =
+    (mappedRegistryId
+      ? normalizedSpecGroups.find((g) => g?.registryCategoryId === mappedRegistryId)
+      : null) || normalizedSpecGroups.find((g) => g?.registryCategoryId?.startsWith("lighting"));
   if (lighting) {
     const parent = asString(lighting.parentLabelRu);
     const label = asString(lighting.labelRu);
@@ -113,26 +181,30 @@ export function buildVisualSearchQuery(semanticDraft, { languageMode = "ru" } = 
   const colorTokens = visualQuery.colors.map((c) => COLOR_LABELS_RU[c] || c);
   const roomToken = visualQuery.room ? ROOM_LABELS_RU[visualQuery.room] || visualQuery.room : roomRu;
 
-  const objectType = visualQuery.type || "подвесной светильник";
+  const objectTypeLabel = fixtureLabelRu(visualQuery.type);
   const conceptKeywords = asArray(spec.designIntent?.whatMustBePreserved).slice(0, 2);
+  const registryCategoryId =
+    resolveRegistryCategoryFromVisualType(visualQuery.type) ||
+    resolveLightingRegistryCategoryFromDraft(semanticDraft);
 
   const ruParts = uniqueStrings([
     styleRu,
     ...styleTokens,
-    objectType,
+    objectTypeLabel,
     ...materialTokens,
     ...colorTokens,
     roomToken,
     ...conceptKeywords,
   ]);
 
+  const enFixtureLabel = fixtureLabelEn(visualQuery.type);
   const enParts = uniqueStrings([
     visualQuery.styles[0] || "modern",
     visualQuery.materials.includes("metal") ? "metal" : "",
     visualQuery.materials.includes("glass") ? "glass" : "",
     visualQuery.colors.includes("brass") ? "brass" : "",
     visualQuery.colors.includes("white") ? "white glass" : "",
-    "pendant light",
+    enFixtureLabel,
     visualQuery.room ? visualQuery.room.replace("_", " ") : "living room",
     "minimalist",
   ]);
@@ -142,8 +214,9 @@ export function buildVisualSearchQuery(semanticDraft, { languageMode = "ru" } = 
     en: enParts.join(" "),
     primary: languageMode === "en" ? enParts.join(" ") : ruParts.join(" "),
     visualQuery,
-    category: categoryLabelFromDraft(semanticDraft),
-    objectType,
+    category: categoryLabelFromDraft(semanticDraft, visualQuery.type),
+    objectType: objectTypeLabel || visualQuery.type || null,
+    registryCategoryId,
   };
 }
 

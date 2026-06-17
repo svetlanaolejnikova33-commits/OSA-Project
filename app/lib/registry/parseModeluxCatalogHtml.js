@@ -1,6 +1,7 @@
 const MODELUX_SITE = "https://modelux.ru";
 
 export const MODELUX_PENDANTS_CATALOG_URL = `${MODELUX_SITE}/catalog/podvesnoi-svetilnik`;
+export const MODELUX_FLOOR_LAMPS_CATALOG_URL = `${MODELUX_SITE}/catalog/napolnyi-svetilnik`;
 
 function decodeHtmlEntities(text) {
   return text
