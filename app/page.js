@@ -156,19 +156,13 @@ function resolveBudgetLinkageId(activeSavedAnalysisRecordId, selectedImageId) {
 
 function resolveActiveBudgetDraft(projectKey, activeSavedAnalysisRecordId, selectedImageId) {
   const linkageId = resolveBudgetLinkageId(activeSavedAnalysisRecordId, selectedImageId);
-  if (linkageId) {
-    const linked = getBudgetDraftForAnalysisRecord(linkageId);
-    if (linked) return linked;
-  }
+  if (!linkageId) return null;
+  const linked = getBudgetDraftForAnalysisRecord(linkageId);
+  if (linked) return linked;
   const pk = typeof projectKey === "string" ? projectKey.trim() : "";
   if (!pk) return null;
   const drafts = readBudgetDraftsForProject(pk);
-  if (!drafts.length) return null;
-  if (linkageId) {
-    const matched = drafts.find((row) => row && row.analysisRecordId === linkageId);
-    if (matched) return matched;
-  }
-  return drafts[0];
+  return drafts.find((row) => row && row.analysisRecordId === linkageId) || null;
 }
 
 function migrateIterationTypeStored(raw) {
@@ -1120,6 +1114,17 @@ function devSessionLog(message, detail) {
   }
 }
 
+const VISION_UNAVAILABLE_ANALYZE_RU = "Vision недоступен, анализ не выполнен.";
+
+function logAnalyzeSource(message, detail) {
+  if (process.env.NODE_ENV !== "development") return;
+  if (detail !== undefined) {
+    console.log(`[ANALYZE-SOURCE] ${message}`, detail);
+  } else {
+    console.log(`[ANALYZE-SOURCE] ${message}`);
+  }
+}
+
 function extractUserBriefFromPromptUsed(promptUsed) {
   if (!promptUsed || typeof promptUsed !== "string") return "";
   const lines = promptUsed.split("\n");
@@ -1579,6 +1584,8 @@ export default function Home() {
   const [createDraftPersistStatus, setCreateDraftPersistStatus] = useState("idle");
   const workspaceSessionEnvelopeRef = useRef(null);
   const skipNextSemanticIdbHydrationRef = useRef(false);
+  /** Blocks IndexedDB semantic hydration while a new analyze image is selected but not yet analyzed. */
+  const pendingNewAnalyzeUploadRef = useRef(null);
   const preferSessionInteriorDraftRef = useRef(false);
   const stableSessionProjectKeyRef = useRef("");
   const workspaceSaveTimerRef = useRef(null);
@@ -2022,6 +2029,7 @@ export default function Home() {
 
   const openSavedAnalysisDocument = async (record) => {
     if (!record) return;
+    pendingNewAnalyzeUploadRef.current = null;
     const restoredDraft = validateSemanticDraft(record.semanticDraft || null, {
       languageMode: record?.semanticDraft?.languageMode || "ru",
     });
@@ -2547,6 +2555,14 @@ export default function Home() {
   useEffect(() => {
     if (!activeProjectKey) return;
     if (!isIndexedDbAvailable()) return;
+    const pendingUploadProjectKey = pendingNewAnalyzeUploadRef.current;
+    if (
+      pendingUploadProjectKey &&
+      String(pendingUploadProjectKey) === String(activeProjectKey)
+    ) {
+      devSessionLog("skip IDB semantic hydration — pending new analyze image upload");
+      return;
+    }
     if (skipNextSemanticIdbHydrationRef.current) {
       skipNextSemanticIdbHydrationRef.current = false;
       return;
@@ -2678,12 +2694,25 @@ export default function Home() {
     let cancelled = false;
 
     if (!semanticDraft || !visualRegistryCategoryId) {
-      if (visualProductCandidatesRef.current.length && semanticDraftRef.current) {
+      if (
+        visualProductCandidatesRef.current.length &&
+        semanticDraftRef.current &&
+        !pendingNewAnalyzeUploadRef.current
+      ) {
         devSessionLog("skip visual product candidate reset — semantic draft still active");
         return () => {
           cancelled = true;
         };
       }
+      setVisualProductCandidates([]);
+      setVisualProductCandidatesLoading(false);
+      setVisualProductCandidatesError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (visualProductCandidatesRef.current.length && pendingNewAnalyzeUploadRef.current) {
       setVisualProductCandidates([]);
       setVisualProductCandidatesLoading(false);
       setVisualProductCandidatesError("");
@@ -5238,12 +5267,17 @@ export default function Home() {
     const fileName = file.name || "image";
     const mimeType = file.type || "image/png";
     const url = URL.createObjectURL(file);
+    const uploadProjectKey =
+      activeProjectKey || stableSessionProjectKeyRef.current || null;
+    pendingNewAnalyzeUploadRef.current = uploadProjectKey;
 
     setSelectedImageFileName(fileName);
     setSelectedImageMimeType(mimeType);
     setSelectedImagePreviewUrl(url);
     setSemanticDraft(null);
+    semanticDraftRef.current = null;
     setActiveSavedAnalysisRecordId("");
+    setActiveAnalysisRecordId("");
     setSavedDocumentSnapshot("");
     setAnalyzeSceneError("");
     setDemoFallbackNotice("");
@@ -5251,6 +5285,22 @@ export default function Home() {
     setSelectedImageBase64("");
     setSelectedImageId("");
     setSelectedImageDimensions({ width: 0, height: 0 });
+    setVisualRecommendationRows([]);
+    setVisualRecommendationsLoading(false);
+    setVisualRecommendationsEmptyMessage("");
+    setVisualProductCandidates([]);
+    setVisualProductCandidatesLoading(false);
+    setVisualProductCandidatesError("");
+    visualProductCandidatesRef.current = [];
+    visualRecommendationRowsRef.current = [];
+    budgetDraftAutoCreateAttemptedRef.current = "";
+    registryBudgetHydratedRef.current = false;
+    setBudgetDraftsVersion((value) => value + 1);
+    logAnalyzeSource("visual rows cleared after upload", {
+      visualRecommendationRows: 0,
+      visualProductCandidates: 0,
+      budgetDraftLinkage: null,
+    });
 
     const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -5314,6 +5364,32 @@ export default function Home() {
     if (isRunning) return;
     if (!selectedImagePreviewUrl || !selectedImageFileName || !selectedImageBase64) return;
 
+    const analyzeImageBase64 = selectedImageBase64;
+    const analyzeImageFileName = selectedImageFileName;
+    const analyzeImagePreviewUrl = selectedImagePreviewUrl;
+    const analyzeImageMimeType = selectedImageMimeType || "image/png";
+    const draftBeforeAnalyze = semanticDraftRef.current;
+    const staleDraftInMemory = Boolean(
+      draftBeforeAnalyze &&
+        hasSemanticAnalysis(draftBeforeAnalyze) &&
+        (!selectedImageId || pendingNewAnalyzeUploadRef.current)
+    );
+    logAnalyzeSource("image filename/base64 length", {
+      fileName: analyzeImageFileName,
+      base64Length: analyzeImageBase64.length,
+      previewUrlKind: analyzeImagePreviewUrl.startsWith("blob:")
+        ? "blob"
+        : analyzeImagePreviewUrl.startsWith("data:")
+          ? "data"
+          : "other",
+    });
+    logAnalyzeSource("semanticDraft before analyze", {
+      hasDraft: Boolean(draftBeforeAnalyze),
+      demoFallback: Boolean(draftBeforeAnalyze?.demoFallback),
+      selectedImageId: selectedImageId || null,
+    });
+    logAnalyzeSource("using stale draft?", { stale: staleDraftInMemory });
+
     let projectKey = activeProjectKey;
     if (!projectKey) {
       projectKey = newStableId();
@@ -5341,10 +5417,7 @@ export default function Home() {
 
       let extractedPalette = null;
       try {
-        extractedPalette = await extractImagePalette(
-          selectedImageBase64,
-          selectedImageMimeType || "image/png"
-        );
+        extractedPalette = await extractImagePalette(analyzeImageBase64, analyzeImageMimeType);
       } catch {
         extractedPalette = null;
       }
@@ -5353,8 +5426,8 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageBase64: selectedImageBase64,
-          mimeType: selectedImageMimeType || "image/png",
+          imageBase64: analyzeImageBase64,
+          mimeType: analyzeImageMimeType,
           languageMode: "ru",
           analysisMode: "full",
           extractedPalette,
@@ -5366,7 +5439,17 @@ export default function Home() {
         const errorMessage =
           typeof payload?.error === "string" ? payload.error : "Vision analysis failed.";
         if (isDemoFallbackEnabled() && isOpenAiGeoBlockError(errorMessage)) {
-          applyDemoSemanticDraftToAnalyzeState(extractedPalette);
+          setSemanticDraft(null);
+          semanticDraftRef.current = null;
+          setVisualRecommendationRows([]);
+          setVisualProductCandidates([]);
+          visualProductCandidatesRef.current = [];
+          visualRecommendationRowsRef.current = [];
+          setAnalyzeSceneError(VISION_UNAVAILABLE_ANALYZE_RU);
+          setDemoFallbackNotice(VISION_UNAVAILABLE_ANALYZE_RU);
+          logAnalyzeSource("vision unavailable — demo fallback suppressed for manual analyze", {
+            errorMessage,
+          });
           return;
         }
         throw new Error(errorMessage);
@@ -5388,21 +5471,22 @@ export default function Home() {
     setSemanticDraft(nextDraft);
     setResultAnalysisMode(selectedAnalysisMode);
     setDemoFallbackNotice("");
+    pendingNewAnalyzeUploadRef.current = null;
     logVisionClassificationDiagnostic(nextDraft, { context: "analyze-image-complete" });
     window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
     scheduleBudgetDraftCreate();
 
       if (isIndexedDbAvailable()) {
-        if (selectedImageBase64) {
-          await saveImageToDB(imageId, selectedImageBase64);
+        if (analyzeImageBase64) {
+          await saveImageToDB(imageId, analyzeImageBase64);
         }
         const record = {
           id: `${projectKey}::${analysisId}`,
           projectKey,
           createdAt,
           imageId,
-          fileName: selectedImageFileName || "",
-          mimeType: selectedImageMimeType || "image/png",
+          fileName: analyzeImageFileName || "",
+          mimeType: analyzeImageMimeType,
           width,
           height,
           semanticDraft: nextDraft,
