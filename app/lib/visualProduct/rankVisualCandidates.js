@@ -1,4 +1,6 @@
 import { mapSpecToSupplierRegistry } from "../mapSpecToSupplierRegistry";
+import { resolveSceneObjectTypeFromSceneGraph } from "../sceneObjectRegistryRouting";
+import { buildVisualFingerprint, visualSimilarityScore } from "./visualFingerprint";
 
 const VISUAL_CANDIDATE_LIMIT = 10;
 
@@ -266,20 +268,24 @@ export function extractVisualQuery(semanticDraft) {
     }
   }
 
-  const types = detectTypes(corpus);
+  const sceneObjectType = resolveSceneObjectTypeFromSceneGraph(semanticDraft);
+  const detectedTypes = detectTypes(corpus);
+  const types = sceneObjectType
+    ? uniqueList([sceneObjectType, ...detectedTypes])
+    : detectedTypes;
   const styles = uniqueList(detectTokens(corpus, STYLE_SYNONYMS));
   const materials = uniqueList(detectTokens(corpus, MATERIAL_SYNONYMS));
   const colors = uniqueList(detectTokens(corpus, COLOR_SYNONYMS));
   const room = detectRoom(corpus);
 
   return {
-    type: types[0] || null,
+    type: sceneObjectType || types[0] || null,
     types,
     styles,
     materials,
     colors,
     room,
-    category: types[0] || null,
+    category: sceneObjectType || types[0] || null,
   };
 }
 
@@ -460,67 +466,12 @@ function scoreWrongFixturePenalties(visualQuery, candidateText) {
   return { points: -cappedPenalty, reasons: uniqueList(reasons) };
 }
 
-function scoreCandidate(visualQuery, candidate) {
-  const candidateText = candidateSearchText(candidate);
-  const reasons = [];
-
-  const typeScore = scoreTypeMatch(visualQuery, candidateText);
-  if (typeScore.reason) reasons.push(typeScore.reason);
-
-  const styleScore = scoreDimensionMatch(
-    visualQuery.styles,
-    STYLE_SYNONYMS,
-    STYLE_REASON_LABELS,
-    STYLE_WEIGHT,
-    candidateText,
-  );
-  reasons.push(...styleScore.reasons);
-
-  const materialScore = scoreDimensionMatch(
-    visualQuery.materials,
-    MATERIAL_SYNONYMS,
-    MATERIAL_REASON_LABELS,
-    MATERIAL_WEIGHT,
-    candidateText,
-  );
-  reasons.push(...materialScore.reasons);
-
-  const colorScore = scoreDimensionMatch(
-    visualQuery.colors,
-    COLOR_SYNONYMS,
-    COLOR_REASON_LABELS,
-    COLOR_WEIGHT,
-    candidateText,
-  );
-  reasons.push(...colorScore.reasons);
-
-  const roomScore = scoreRoomMatch(visualQuery, candidateText);
-  if (roomScore.reason) reasons.push(roomScore.reason);
-
-  let floorLampBoost = { points: 0, reasons: [] };
-  let wrongFixturePenalty = { points: 0, reasons: [] };
-
-  if (isFloorLampQuery(visualQuery)) {
-    floorLampBoost = scoreFloorLampFeatureBoosts(candidateText);
-    wrongFixturePenalty = scoreWrongFixturePenalties(visualQuery, candidateText);
-    reasons.push(...floorLampBoost.reasons);
-    reasons.push(...wrongFixturePenalty.reasons);
-  }
-
-  const rawScore =
-    typeScore.points +
-    styleScore.points +
-    materialScore.points +
-    colorScore.points +
-    roomScore.points +
-    floorLampBoost.points +
-    wrongFixturePenalty.points;
-
-  const visualMatchScore = Math.max(0, Math.min(100, rawScore));
+function scoreCandidate(fingerprint, candidate) {
+  const { score, matchedFields } = visualSimilarityScore(fingerprint, candidate);
 
   return {
-    visualMatchScore,
-    visualMatchReasons: uniqueList(reasons),
+    visualMatchScore: score,
+    visualMatchReasons: matchedFields,
     sku: extractCandidateSku(candidate),
   };
 }
@@ -548,11 +499,15 @@ export function rankVisualCandidates(semanticDraft, visualProductCandidates) {
   const candidates = asArray(visualProductCandidates);
   if (!candidates.length) return [];
 
-  const visualQuery = extractVisualQuery(semanticDraft);
+  const fingerprint = buildVisualFingerprint(semanticDraft);
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[VISUAL-FINGERPRINT]", JSON.stringify(fingerprint));
+  }
 
   return candidates
     .map((candidate) => {
-      const scored = scoreCandidate(visualQuery, candidate);
+      const scored = scoreCandidate(fingerprint, candidate);
       return {
         productName: candidate.productName,
         imageUrl: candidate.imageUrl || null,
@@ -562,7 +517,6 @@ export function rankVisualCandidates(semanticDraft, visualProductCandidates) {
         visualMatchReasons: scored.visualMatchReasons,
       };
     })
-    .filter((row) => !isFloorLampQuery(visualQuery) || row.visualMatchScore > 0)
     .sort(compareCandidates)
     .slice(0, VISUAL_CANDIDATE_LIMIT);
 }

@@ -9,15 +9,21 @@ import {
   rankVisualCandidates as rankCatalogCandidates,
 } from "./visualProduct/rankVisualCandidates";
 import { logRecommendationPipelineTrace } from "./recommendationPipelineTrace";
+import { resolveRegistryCategoryFromSceneGraph } from "./sceneObjectRegistryRouting";
+import { buildVisualFingerprint } from "./visualProduct/visualFingerprint";
 
 const VISUAL_TYPE_TO_REGISTRY_CATEGORY = {
   floor_lamp: "lighting.floor_lamps",
   подвесной: "lighting.pendants",
   pendant: "lighting.pendants",
   люстра: "lighting.chandeliers",
-  chandelier: "lighting.chandeliers",
+  chandelier: "lighting.pendants",
   бра: "lighting.wall_sconces",
   wall_light: "lighting.wall_sconces",
+  wall_lamp: "lighting.wall_sconces",
+  wall_sconce: "lighting.wall_sconces",
+  table_lamp: "lighting.table_lamps",
+  spotlight: "lighting.recessed_lights",
 };
 
 const FIXTURE_TYPE_LABELS_RU = {
@@ -182,6 +188,7 @@ export function buildVisualSearchQuery(semanticDraft, { languageMode = "ru" } = 
   const objectTypeLabel = fixtureLabelRu(visualQuery.type);
   const conceptKeywords = asArray(spec.designIntent?.whatMustBePreserved).slice(0, 2);
   const registryCategoryId =
+    resolveRegistryCategoryFromSceneGraph(semanticDraft) ||
     resolveRegistryCategoryFromVisualType(visualQuery.type) ||
     resolveLightingRegistryCategoryFromDraft(semanticDraft);
 
@@ -647,6 +654,10 @@ export async function buildVisualRecommendationPipeline(
   }
 
   const query = buildVisualSearchQuery(semanticDraft, { languageMode });
+  const visualFingerprint = buildVisualFingerprint(semanticDraft);
+  if (process.env.NODE_ENV === "development") {
+    console.log("[VISUAL-FINGERPRINT] pipeline", JSON.stringify(visualFingerprint));
+  }
   const discovered = await discoverVisualCandidates({
     semanticDraft,
     searchQuery: query,
@@ -668,6 +679,7 @@ export async function buildVisualRecommendationPipeline(
 
   return {
     query,
+    visualFingerprint,
     candidates: enriched,
     rows,
     emptyMessage: rows.length ? "" : "Визуальные аналоги пока не найдены",

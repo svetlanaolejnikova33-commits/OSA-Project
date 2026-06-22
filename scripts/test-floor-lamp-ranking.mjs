@@ -113,8 +113,11 @@ assert(/brass|latun|gold|linen|art deco|torchere|napolny/i.test(top.productName)
 const pendant = ranked.find((row) => /podves|pendant/i.test(row.productName));
 assert(!pendant || pendant.visualMatchScore < top.visualMatchScore, "pendant must rank below floor lamp matches");
 
-const excluded = ranked.find((row) => /lustre|chandelier/i.test(row.productName));
-assert(!excluded, "люстра candidate must be excluded from floor_lamp ranking");
+const lustre = ranked.find((row) => /lustre|chandelier/i.test(row.productName));
+assert(
+  !lustre || lustre.visualMatchScore < top.visualMatchScore,
+  "люстра must rank below floor lamp matches",
+);
 
 console.log("[floor-lamp-ranking] PASS");
 console.log(

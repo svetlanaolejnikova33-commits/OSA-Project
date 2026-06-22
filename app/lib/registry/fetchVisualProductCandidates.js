@@ -1,4 +1,5 @@
 import { mapSpecToSupplierRegistry } from "../mapSpecToSupplierRegistry";
+import { resolveRegistryCategoryFromSceneGraph } from "../sceneObjectRegistryRouting";
 import { extractVisualQuery } from "../visualProduct/rankVisualCandidates";
 import { resolveRegistryCategoryFromVisualType } from "../visualProductDiscovery";
 
@@ -15,6 +16,9 @@ function asString(value) {
  */
 export function resolveRegistryCategoryIdFromSemanticDraft(semanticDraft) {
   if (!semanticDraft || typeof semanticDraft !== "object") return null;
+
+  const fromSceneGraph = resolveRegistryCategoryFromSceneGraph(semanticDraft);
+  if (fromSceneGraph) return fromSceneGraph;
 
   const visualQuery = extractVisualQuery(semanticDraft);
   const fromType = resolveRegistryCategoryFromVisualType(visualQuery?.type);
