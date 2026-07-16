@@ -1,0 +1,38 @@
+{
+  "name": "modelux-floor-lamp-rich",
+  "vision": {
+    "category": "floor lamp",
+    "subtype": "freestanding floor lamp",
+    "mounting": "floor",
+    "material": "brass",
+    "finish": "aged brass",
+    "style": "modern classic",
+    "shape": "vertical stem with tapered shade",
+    "confidence": 0.94,
+    "construction": "straight vertical stem; articulated horizontal arm",
+    "proportions": "tall slender vertical proportions",
+    "silhouette": "tapered textile shade on vertical stem",
+    "distinctive_features": [
+      "integrated circular side table",
+      "articulated swing arm",
+      "ornate stepped round base",
+      "tapered textile shade",
+      "aged brass finish"
+    ],
+    "decorative_details": ["stepped base rings", "textile shade", "ornate base detailing"],
+    "functional_elements": ["integrated side table", "adjustable arm", "lamp shade", "reading / task light"],
+    "color_palette": ["aged brass", "warm textile"],
+    "material_combinations": ["brass / aged brass", "metal / textile"],
+    "likely_use": "reading / ambient lighting",
+    "visual_role": "focal lighting object",
+    "design_character": "warm traditional / modern-classic",
+    "search_constraints": [
+      "floor lamp",
+      "freestanding",
+      "aged brass",
+      "integrated side table",
+      "articulated arm"
+    ],
+    "negative_constraints": ["not wall-mounted", "not ceiling pendant", "not fixed rigid stem only"]
+  }
+}

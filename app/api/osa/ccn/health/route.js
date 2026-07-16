@@ -17,9 +17,16 @@ export async function GET() {
 
   return Response.json({
     configured: env.configured && isCcnLiveEnabled(),
-    browserbase: env.browserbase.apiKey && env.browserbase.projectId ? "configured" : "missing",
+    browserbase:
+      env.browserEnv === "LOCAL"
+        ? "not_required"
+        : env.browserbase.apiKey && env.browserbase.projectId
+          ? "configured"
+          : "missing",
     stagehand: env.stagehand.model ? `model:${env.stagehand.model}` : "missing",
     mode,
+    browserEnv: env.browserEnv,
+    headless: env.headless,
     liveEnabled: env.liveEnabled,
     missing: env.missing,
     adapter: {

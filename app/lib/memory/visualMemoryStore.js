@@ -1,7 +1,16 @@
 import { createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
+import {
+  buildBasicVisualFingerprint,
+  buildRichVisualFingerprint,
+} from "../buildRichVisualFingerprint";
 import { VISION_JSON_ATTRIBUTE_KEYS } from "../visionJsonContract";
+import {
+  createEmptyExperience,
+  mergeExperience,
+  normalizeExperience,
+} from "./experienceMemory";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -20,19 +29,15 @@ function defaultStorePath() {
 
 /**
  * Stable fingerprint object from Vision JSON attributes (not image embeddings).
+ * Keeps basic attribute identity for backward-compatible memory records.
  */
 export function buildVisualFingerprint(vision) {
-  const source = vision && typeof vision === "object" ? vision : {};
-  const fingerprint = {};
-  for (const key of VISION_JSON_ATTRIBUTE_KEYS) {
-    fingerprint[key] = asString(source[key]).toLowerCase();
-  }
-  return fingerprint;
+  return buildBasicVisualFingerprint(vision);
 }
 
 export function fingerprintKey(fingerprint) {
   const fp = fingerprint && typeof fingerprint === "object" ? fingerprint : {};
-  const parts = VISION_JSON_ATTRIBUTE_KEYS.map((key) => asString(fp[key]));
+  const parts = VISION_JSON_ATTRIBUTE_KEYS.map((key) => asString(fp[key]).toLowerCase());
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32);
 }
 
@@ -47,9 +52,15 @@ function normalizeRecord(raw) {
   const manufacturerId = asString(raw.manufacturer_id);
   if (!article || !manufacturerId || !vision) return null;
 
+  const rich =
+    raw.rich_visual_fingerprint && typeof raw.rich_visual_fingerprint === "object"
+      ? raw.rich_visual_fingerprint
+      : buildRichVisualFingerprint(vision);
+
   return {
     id: asString(raw.id) || `${manufacturerId}:${article}:${fingerprintKey(fingerprint)}`,
     visual_fingerprint: fingerprint,
+    rich_visual_fingerprint: rich,
     vision,
     manufacturer_id: manufacturerId,
     catalog_url: asString(raw.catalog_url),
@@ -59,6 +70,7 @@ function normalizeRecord(raw) {
     confidence: asNumber(raw.confidence, asNumber(vision.confidence, 0)),
     match_type: asString(raw.match_type) || "ccn_live",
     last_verified_at: asString(raw.last_verified_at) || new Date().toISOString(),
+    experience: normalizeExperience(raw.experience),
   };
 }
 
@@ -105,7 +117,11 @@ export class VisualMemoryStore {
 
   list() {
     this._ensureLoaded();
-    return this._records.map((record) => ({ ...record, vision: { ...record.vision } }));
+    return this._records.map((record) => ({
+      ...record,
+      vision: { ...record.vision },
+      experience: normalizeExperience(record.experience),
+    }));
   }
 
   clear() {
@@ -114,13 +130,84 @@ export class VisualMemoryStore {
   }
 
   /**
+   * Find records sharing the same basic visual fingerprint identity.
+   */
+  findByFingerprint(fingerprint) {
+    this._ensureLoaded();
+    const key = fingerprintKey(fingerprint);
+    return this._records.filter(
+      (entry) => fingerprintKey(entry.visual_fingerprint) === key,
+    );
+  }
+
+  /**
+   * Propagate experience to every record with the same visual fingerprint.
+   * Replaces with the caller-provided snapshot (already merged + updated).
+   * Manufacturers are never deleted from that snapshot — only confidence changes.
+   */
+  syncExperienceForFingerprint(fingerprint, experience) {
+    this._ensureLoaded();
+    const key = fingerprintKey(fingerprint);
+    const normalized = normalizeExperience(experience);
+    let updated = 0;
+    for (let i = 0; i < this._records.length; i += 1) {
+      if (fingerprintKey(this._records[i].visual_fingerprint) !== key) continue;
+      this._records[i] = {
+        ...this._records[i],
+        experience: normalized,
+      };
+      updated += 1;
+    }
+    if (updated > 0) this._persist();
+    return updated;
+  }
+
+  /**
+   * Patch experience on matching records (by fingerprint + optional article).
+   * Never deletes records.
+   */
+  updateExperience(matcher, experience) {
+    this._ensureLoaded();
+    const next = normalizeExperience(experience);
+    let updated = 0;
+    for (let i = 0; i < this._records.length; i += 1) {
+      const entry = this._records[i];
+      if (matcher?.fingerprint) {
+        if (fingerprintKey(entry.visual_fingerprint) !== fingerprintKey(matcher.fingerprint)) {
+          continue;
+        }
+      }
+      if (matcher?.article && entry.article !== asString(matcher.article)) continue;
+      if (
+        matcher?.manufacturer_id &&
+        entry.manufacturer_id.toLowerCase() !== asString(matcher.manufacturer_id).toLowerCase()
+      ) {
+        continue;
+      }
+      this._records[i] = { ...entry, experience: next };
+      updated += 1;
+    }
+    if (updated > 0) this._persist();
+    return updated;
+  }
+
+  /**
    * Insert or update by manufacturer_id + article (+ fingerprint when present).
+   * Preserves / merges experience; never deletes prior manufacturers from experience.
    */
   upsert(input) {
     this._ensureLoaded();
+    const fingerprint = input?.visual_fingerprint || buildVisualFingerprint(input?.vision);
+    const sameFingerprint = this.findByFingerprint(fingerprint);
+    const priorExperience = sameFingerprint.reduce(
+      (acc, entry) => mergeExperience(acc, entry.experience),
+      createEmptyExperience(),
+    );
+
     const record = normalizeRecord({
       ...input,
-      visual_fingerprint: input?.visual_fingerprint || buildVisualFingerprint(input?.vision),
+      visual_fingerprint: fingerprint,
+      experience: mergeExperience(priorExperience, input?.experience),
       last_verified_at: input?.last_verified_at || new Date().toISOString(),
     });
     if (!record) {
@@ -135,18 +222,31 @@ export class VisualMemoryStore {
     );
 
     if (index >= 0) {
+      const previous = this._records[index];
       this._records[index] = {
-        ...this._records[index],
+        ...previous,
         ...record,
-        id: this._records[index].id,
+        id: previous.id,
+        experience: mergeExperience(previous.experience, record.experience),
         last_verified_at: record.last_verified_at,
       };
     } else {
       this._records.push(record);
     }
 
+    // Accumulate experience across all records sharing this visual fingerprint.
+    this.syncExperienceForFingerprint(record.visual_fingerprint, record.experience);
+
     this._persist();
-    return { ok: true, error: null, record: { ...record } };
+    const stored =
+      this._records.find(
+        (entry) =>
+          entry.manufacturer_id === record.manufacturer_id &&
+          entry.article === record.article &&
+          fingerprintKey(entry.visual_fingerprint) === fingerprintKey(record.visual_fingerprint),
+      ) || record;
+
+    return { ok: true, error: null, record: { ...stored } };
   }
 }
 

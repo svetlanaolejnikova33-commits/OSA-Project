@@ -6,9 +6,13 @@ export async function POST(request) {
     const result = assembleSpecification({
       vision: body?.vision,
       product: body?.product,
+      manufacturer: body?.manufacturer,
       placement: body?.placement,
       gates: body?.gates,
       human_overrides: body?.human_overrides,
+      memory: body?.memory,
+      livePath: Boolean(body?.livePath),
+      partial: Boolean(body?.partial),
     });
 
     return Response.json(result);
