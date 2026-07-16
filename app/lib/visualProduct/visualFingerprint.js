@@ -89,7 +89,7 @@ function collectRawTerms(value) {
   return bucket;
 }
 
-function resolvePrimarySceneObject(semanticDraft) {
+export function resolvePrimarySceneObject(semanticDraft) {
   const objects = asArray(semanticDraft?.sceneGraph?.objects);
   if (!objects.length) return null;
 

@@ -1,0 +1,17 @@
+{
+  "name": "human-pick",
+  "manufacturer_id": "flos",
+  "vision": {
+    "category": "pendant light",
+    "mounting": "ceiling",
+    "material": "brass",
+    "finish": "aged brass",
+    "style": "modern",
+    "shape": "cylindrical",
+    "confidence": 0.9
+  },
+  "expect": {
+    "status": "needs_human",
+    "hitl": "H3"
+  }
+}

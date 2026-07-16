@@ -1,0 +1,17 @@
+{
+  "name": "happy-path",
+  "manufacturer_id": "modelux",
+  "vision": {
+    "category": "pendant light",
+    "mounting": "ceiling",
+    "material": "brass",
+    "finish": "aged brass",
+    "style": "modern",
+    "shape": "cylindrical",
+    "confidence": 0.93
+  },
+  "expect": {
+    "status": "ok",
+    "article": "MD.6102.AB"
+  }
+}

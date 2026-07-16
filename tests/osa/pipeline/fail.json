@@ -1,0 +1,17 @@
+{
+  "name": "fail",
+  "manufacturer_id": "artemide",
+  "vision": {
+    "category": "oak dining table",
+    "mounting": "floor",
+    "material": "oak",
+    "finish": "natural oak",
+    "style": "rustic",
+    "shape": "rectangular",
+    "confidence": 0.88
+  },
+  "expect": {
+    "status": "needs_human",
+    "hitl": "H4"
+  }
+}

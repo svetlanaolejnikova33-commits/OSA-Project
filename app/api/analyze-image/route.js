@@ -1,10 +1,12 @@
 import OpenAI from "openai";
+import { mapSemanticDraftToVisionJson } from "../../lib/mapSemanticDraftToVisionJson";
 import {
   extractJsonObject,
   getSemanticDraftJsonSchema,
   normalizeVisionRequestMode,
   validateSemanticDraft,
 } from "../../lib/validateSemanticDraft";
+import { validateVisionJson } from "../../lib/visionJsonContract";
 
 const VISION_MODEL = "gpt-4o";
 
@@ -180,7 +182,22 @@ export async function POST(request) {
       extractedPalette,
     });
 
-    return Response.json({ semanticDraft });
+    const visionCandidate = mapSemanticDraftToVisionJson(semanticDraft);
+    const visionValidation = validateVisionJson(visionCandidate);
+
+    if (!visionValidation.ok) {
+      return Response.json({
+        semanticDraft,
+        vision: null,
+        error: "Vision JSON validation failed.",
+        visionErrors: visionValidation.errors,
+      });
+    }
+
+    return Response.json({
+      semanticDraft,
+      vision: visionValidation.vision,
+    });
   } catch (error) {
     console.error("[analyze-image]", error);
     const message = error instanceof Error ? error.message : "Vision analysis failed.";
