@@ -10,6 +10,7 @@ import { VisualProductDiscoverySection } from "./VisualProductDiscoverySection";
 import { BudgetRecommendationsSection } from "./BudgetRecommendationsSection";
 import { ProjectSelectionSection } from "./ProjectSelectionSection";
 import { StructuredEstimateSection } from "./StructuredEstimateSection";
+import { OfficeResultPanel } from "./OfficeResultPanel";
 import { DesignerNarrativePanel } from "./DesignerNarrativePanel";
 import { sumPreviewBudgetRows } from "../lib/registry/buildPreviewBudgetRows";
 import {
@@ -1040,6 +1041,9 @@ export function VisionAnalysisPanel({
   visualRecommendationRows = [],
   visualRecommendationsLoading = false,
   visualRecommendationsEmptyMessage = "",
+  officeResult = null,
+  officeLoading = false,
+  officeError = "",
 }) {
   if (!semanticDraft) return null;
 
@@ -1141,6 +1145,13 @@ export function VisionAnalysisPanel({
   if (isCenterPlacement) {
     return (
       <div className="osa-analysis-panel" style={{ width: "100%", textAlign: "left" }}>
+        <OfficeResultPanel
+          result={officeResult}
+          loading={officeLoading}
+          error={officeError}
+          isDark={isDark}
+          isMobile={isMobile}
+        />
         <CompactAnalysisSummary
           semanticDraft={semanticDraft}
           analysisMode={analysisMode}

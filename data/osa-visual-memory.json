@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "id": "modelux:MD.8024.01FL:7ad981e5cc409c509f923edab38d5521",
+      "visual_fingerprint": {
+        "category": "floor lamp",
+        "mounting": "floor",
+        "material": "brass",
+        "finish": "aged brass",
+        "style": "modern classic",
+        "shape": "vertical stem with tapered shade"
+      },
+      "rich_visual_fingerprint": {
+        "category": "floor lamp",
+        "subtype": "freestanding floor lamp",
+        "mounting": "floor",
+        "construction": "straight vertical stem; articulated horizontal arm",
+        "proportions": "tall slender vertical proportions",
+        "silhouette": "tapered textile shade on vertical stem",
+        "material_combinations": [
+          "brass / aged brass",
+          "metal / textile"
+        ],
+        "finish": "aged brass",
+        "material": "brass",
+        "distinctive_features": [
+          "aged brass finish",
+          "articulated swing arm",
+          "integrated circular side table",
+          "ornate stepped round base",
+          "tapered textile shade"
+        ],
+        "functional_elements": [
+          "adjustable arm",
+          "integrated side table",
+          "lamp shade",
+          "reading / task light"
+        ],
+        "decorative_details": [
+          "ornate base detailing",
+          "stepped base rings",
+          "textile shade"
+        ],
+        "style": "modern classic",
+        "shape": "vertical stem with tapered shade",
+        "negative_constraints": [
+          "not ceiling pendant",
+          "not fixed rigid stem only",
+          "not wall-mounted"
+        ]
+      },
+      "vision": {
+        "category": "floor lamp",
+        "mounting": "floor",
+        "material": "brass",
+        "finish": "aged brass",
+        "style": "modern classic",
+        "shape": "vertical stem with tapered shade",
+        "confidence": 0.94,
+        "subtype": "freestanding floor lamp",
+        "construction": "straight vertical stem; articulated horizontal arm",
+        "proportions": "tall slender vertical proportions",
+        "silhouette": "tapered textile shade on vertical stem",
+        "likely_use": "reading / ambient lighting",
+        "visual_role": "focal lighting object",
+        "design_character": "warm traditional / modern-classic",
+        "distinctive_features": [
+          "integrated circular side table",
+          "articulated swing arm",
+          "ornate stepped round base",
+          "tapered textile shade",
+          "aged brass finish"
+        ],
+        "decorative_details": [
+          "stepped base rings",
+          "textile shade",
+          "ornate base detailing"
+        ],
+        "functional_elements": [
+          "integrated side table",
+          "adjustable arm",
+          "lamp shade",
+          "reading / task light"
+        ],
+        "color_palette": [
+          "aged brass",
+          "warm textile"
+        ],
+        "material_combinations": [
+          "brass / aged brass",
+          "metal / textile"
+        ],
+        "search_constraints": [
+          "floor lamp",
+          "freestanding",
+          "aged brass",
+          "integrated side table",
+          "articulated arm"
+        ],
+        "negative_constraints": [
+          "not wall-mounted",
+          "not ceiling pendant",
+          "not fixed rigid stem only"
+        ]
+      },
+      "manufacturer_id": "modelux",
+      "catalog_url": "https://modelux.ru/catalog/napolnyi-svetilnik",
+      "product_url": "https://modelux.ru/catalog/product/md-8024-01fl",
+      "article": "MD.8024.01FL",
+      "category": "floor lamp",
+      "confidence": 0.94,
+      "match_type": "ccn_live",
+      "last_verified_at": "2026-07-28T23:07:40.188Z",
+      "experience": {
+        "seen_count": 1,
+        "successful_matches": 1,
+        "failed_matches": 0,
+        "manufacturers_seen": [
+          {
+            "manufacturer_id": "modelux",
+            "success_count": 1,
+            "last_seen": "2026-07-28T23:07:40.188Z",
+            "confidence": 0.55
+          }
+        ],
+        "catalogs_seen": [
+          {
+            "catalog_url": "https://modelux.ru/catalog/napolnyi-svetilnik",
+            "success_count": 1,
+            "confidence": 0.55
+          }
+        ],
+        "last_success_at": "2026-07-28T23:07:40.188Z",
+        "confidence_growth": 0.55
+      }
+    }
+  ]
+}

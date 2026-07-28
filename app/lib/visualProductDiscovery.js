@@ -629,7 +629,6 @@ export function visualCandidatesToRecommendationRows(candidates) {
 
 export function registryStatusLabel(status, sourceType, providerId) {
   if (status === REGISTRY_STATUS.CONFIRMED) return "подтверждено реестром";
-  if (providerId === "google_lens") return "визуальный аналог из интернета";
   if (status === REGISTRY_STATUS.SIMILAR) return "аналог найден, ожидает подтверждения поставщика";
   if (sourceType === SOURCE_TYPE.INTERNET) return "из интернета";
   return "визуальный аналог";

@@ -5,6 +5,7 @@ import { runChiefCatalogNavigatorLive } from "../ccn/live/ccnLiveAdapter";
 import { resolveCatalogUrlForVision } from "../ccn/live/resolveLiveTarget";
 import { resolveManufacturerCatalog } from "../ccn/resolveManufacturerCatalog";
 import { buildRichVisualFingerprint } from "../buildRichVisualFingerprint";
+import { runEvidenceDiscovery } from "../evidence/runEvidenceDiscovery";
 import { recommendManufacturersByExperience } from "../memory/experienceMemory";
 import { MEMORY_HIT_MIN, searchVisualMemory } from "../memory/fingerprintMatcher";
 import {
@@ -44,8 +45,184 @@ async function runCcnNavigation({
   });
 }
 
+function withEvidence(payload, evidence) {
+  if (!evidence) return payload;
+  return { ...payload, evidence };
+}
+
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Try memory verify + CCN for one manufacturer. CCN contract unchanged.
+ * @returns {Promise<{ kind: "ok" | "human" | "fail" | "skip", payload?: object }>}
+ */
+async function attemptManufacturerValidation({
+  manufacturerId,
+  vision,
+  g1,
+  placement,
+  human_overrides,
+  store,
+  experienceRanking,
+  memoryCandidates,
+  topMemoryOpen,
+  livePath,
+  catalogUrlOverride = "",
+}) {
+  const manufacturer = resolveManufacturerCatalog(manufacturerId);
+  if (!manufacturer) return { kind: "skip" };
+
+  const catalogUrl =
+    asString(catalogUrlOverride) ||
+    resolveCatalogUrlForVision(manufacturer, vision) ||
+    manufacturer.catalog_url;
+
+  const memorySearch = searchVisualMemory(vision, {
+    manufacturer_id: manufacturer.manufacturer_id,
+    store,
+    limit: 5,
+  });
+  const topMemory = memorySearch.ok
+    ? memorySearch.candidates[0]
+    : topMemoryOpen &&
+        String(topMemoryOpen.manufacturer_id).toLowerCase() ===
+          manufacturer.manufacturer_id.toLowerCase()
+      ? topMemoryOpen
+      : null;
+
+  if (!livePath && topMemory && topMemory.similarity >= MEMORY_HIT_MIN) {
+    const verified = verifyRememberedProduct({
+      vision,
+      manufacturer_id: topMemory.manufacturer_id || manufacturer.manufacturer_id,
+      article: topMemory.article,
+      product_url: topMemory.product_url,
+      catalog_url: topMemory.catalog_url || catalogUrl,
+    });
+
+    if (verified.ok && verified.product) {
+      const gateG3 = {
+        decision: "accept",
+        reason: "memory proposal verified by CCN",
+        match_confidence: verified.product.match_confidence,
+      };
+
+      return {
+        kind: "ok",
+        payload: finishSuccess({
+          vision,
+          product: verified.product,
+          manufacturer: verified.manufacturer || { ...manufacturer, catalog_url: catalogUrl },
+          placement,
+          g1,
+          gateG3,
+          human_overrides,
+          memory: {
+            used: true,
+            similarity: topMemory.similarity,
+            proposed_article: topMemory.article,
+            fallback: false,
+          },
+          store,
+          experience_ranking: experienceRanking,
+          livePath: false,
+        }),
+      };
+    }
+
+    recordVisualMemoryFailure(
+      {
+        vision,
+        manufacturer_id: topMemory.manufacturer_id || manufacturer.manufacturer_id,
+        catalog_url: topMemory.catalog_url || catalogUrl,
+        article: topMemory.article,
+      },
+      { store },
+    );
+  }
+
+  const ccn = await runCcnNavigation({
+    vision,
+    manufacturer_id: manufacturer.manufacturer_id,
+    catalog_url: catalogUrl,
+    memory_candidates: memoryCandidates,
+    experience_candidates: experienceRanking,
+  });
+
+  const g3 = evaluateGateG3(ccn.product?.candidates || []);
+  const gateG3 = {
+    decision: ccn.gate?.decision || g3.decision,
+    reason: ccn.gate?.reason || g3.reason,
+    match_confidence: ccn.gate?.match_confidence ?? g3.match_confidence,
+  };
+
+  const memoryMeta = {
+    used: false,
+    similarity: topMemory?.similarity ?? null,
+    proposed_article: topMemory?.article ?? null,
+    fallback: Boolean(topMemory && topMemory.similarity >= MEMORY_HIT_MIN),
+  };
+
+  if (gateG3.decision === "human_pick") {
+    return {
+      kind: "human",
+      payload: finishNeedsHuman({
+        hitl: "H3",
+        reason: gateG3.reason,
+        vision,
+        product: ccn.product,
+        manufacturer: { ...manufacturer, catalog_url: catalogUrl },
+        placement,
+        g1,
+        gateG3,
+        memory: memoryMeta,
+        experience_ranking: experienceRanking,
+        livePath,
+        candidates: ccn.product?.candidates || [],
+      }),
+    };
+  }
+
+  if (gateG3.decision === "fail") {
+    return {
+      kind: "fail",
+      payload: finishNeedsHuman({
+        hitl: "H4",
+        reason: gateG3.reason,
+        vision,
+        product: ccn.product,
+        manufacturer: { ...manufacturer, catalog_url: catalogUrl },
+        placement,
+        g1,
+        gateG3,
+        memory: memoryMeta,
+        experience_ranking: experienceRanking,
+        livePath,
+        candidates: ccn.product?.candidates || [],
+      }),
+    };
+  }
+
+  return {
+    kind: "ok",
+    payload: finishSuccess({
+      vision,
+      product: {
+        ...ccn.product,
+        match_type: ccn.product?.match_type || (livePath ? ccn.product?.match_type : "ccn_live"),
+      },
+      manufacturer: { ...manufacturer, catalog_url: catalogUrl },
+      placement,
+      g1,
+      gateG3,
+      human_overrides,
+      memory: memoryMeta,
+      store,
+      experience_ranking: experienceRanking,
+      livePath,
+    }),
+  };
 }
 
 function needsHumanPayload(hitl, reason, extra = {}) {
@@ -244,168 +421,95 @@ export async function runOsaPipeline(input) {
     store,
   });
 
-  // Manufacturer: explicit → experience → fail (registry resolve still required).
+  // Manufacturer: explicit → experience → Evidence Discovery candidates.
   let manufacturerId = asString(input?.manufacturer_id);
   if (!manufacturerId && experienceRanking.length) {
     manufacturerId = experienceRanking[0].manufacturer_id;
   }
 
-  const manufacturer = resolveManufacturerCatalog(manufacturerId);
-  if (!manufacturer) {
-    return needsHumanPayload("H4", `Unknown manufacturer_id: ${manufacturerId || "(empty)"}`, {
+  /** @type {object | null} */
+  let evidence = null;
+  /** @type {string[]} */
+  const manufacturerQueue = [];
+
+  if (manufacturerId) {
+    manufacturerQueue.push(manufacturerId);
+  } else {
+    evidence = await runEvidenceDiscovery({
+      vision: cvo.vision,
+      imagePublicUrl: input?.imagePublicUrl,
+      fetchMatches: input?.evidenceFetchMatches,
+    });
+    for (const cand of evidence.candidates || []) {
+      const id = asString(cand?.manufacturer_id);
+      if (id && !manufacturerQueue.includes(id)) manufacturerQueue.push(id);
+    }
+  }
+
+  if (!manufacturerQueue.length) {
+    return withEvidence(
+      needsHumanPayload(
+        "H4",
+        evidence?.reason ||
+          `Unknown manufacturer_id: ${manufacturerId || "(empty)"}`,
+        {
+          vision: cvo.vision,
+          gates: { g1 },
+          memory: {
+            used: false,
+            experience_ranking: experienceRanking,
+          },
+        },
+      ),
+      evidence,
+    );
+  }
+
+  /** @type {object | null} */
+  let lastFailPayload = null;
+
+  for (const candidateId of manufacturerQueue) {
+    const attempt = await attemptManufacturerValidation({
+      manufacturerId: candidateId,
+      vision: cvo.vision,
+      g1,
+      placement: input?.placement,
+      human_overrides: input?.human_overrides,
+      store,
+      experienceRanking,
+      memoryCandidates,
+      topMemoryOpen,
+      livePath,
+      catalogUrlOverride:
+        manufacturerQueue.length === 1 ? asString(input?.catalog_url) : "",
+    });
+
+    if (attempt.kind === "skip") continue;
+    if (attempt.kind === "ok" || attempt.kind === "human") {
+      return withEvidence(attempt.payload, evidence);
+    }
+    if (attempt.kind === "fail") {
+      lastFailPayload = attempt.payload;
+      // Evidence-driven: try next candidate. Explicit single id: stop on fail.
+      if (manufacturerQueue.length === 1) {
+        return withEvidence(attempt.payload, evidence);
+      }
+    }
+  }
+
+  if (lastFailPayload) {
+    return withEvidence(lastFailPayload, evidence);
+  }
+
+  return withEvidence(
+    needsHumanPayload("H4", "No Evidence candidate passed Office Validation.", {
       vision: cvo.vision,
       gates: { g1 },
       memory: {
         used: false,
         experience_ranking: experienceRanking,
       },
-    });
-  }
-
-  const catalogUrl =
-    asString(input?.catalog_url) ||
-    resolveCatalogUrlForVision(manufacturer, cvo.vision) ||
-    manufacturer.catalog_url;
-
-  const memorySearch = searchVisualMemory(cvo.vision, {
-    manufacturer_id: manufacturer.manufacturer_id,
-    store,
-    limit: 5,
-  });
-  const topMemory = memorySearch.ok
-    ? memorySearch.candidates[0]
-    : topMemoryOpen &&
-        String(topMemoryOpen.manufacturer_id).toLowerCase() ===
-          manufacturer.manufacturer_id.toLowerCase()
-      ? topMemoryOpen
-      : null;
-
-  // Memory verify stays on mock catalog verification unless live path handles remembered URL later.
-  if (!livePath && topMemory && topMemory.similarity >= MEMORY_HIT_MIN) {
-    const verified = verifyRememberedProduct({
-      vision: cvo.vision,
-      manufacturer_id: topMemory.manufacturer_id || manufacturer.manufacturer_id,
-      article: topMemory.article,
-      product_url: topMemory.product_url,
-      catalog_url: topMemory.catalog_url || catalogUrl,
-    });
-
-    if (verified.ok && verified.product) {
-      const gateG3 = {
-        decision: "accept",
-        reason: "memory proposal verified by CCN",
-        match_confidence: verified.product.match_confidence,
-      };
-
-      return finishSuccess({
-        vision: cvo.vision,
-        product: verified.product,
-        manufacturer: verified.manufacturer || { ...manufacturer, catalog_url: catalogUrl },
-        placement: input?.placement,
-        g1,
-        gateG3,
-        human_overrides: input?.human_overrides,
-        memory: {
-          used: true,
-          similarity: topMemory.similarity,
-          proposed_article: topMemory.article,
-          fallback: false,
-        },
-        store,
-        experience_ranking: experienceRanking,
-        livePath: false,
-      });
-    }
-
-    recordVisualMemoryFailure(
-      {
-        vision: cvo.vision,
-        manufacturer_id: topMemory.manufacturer_id || manufacturer.manufacturer_id,
-        catalog_url: topMemory.catalog_url || catalogUrl,
-        article: topMemory.article,
-      },
-      { store },
-    );
-  }
-
-  const ccn = await runCcnNavigation({
-    vision: cvo.vision,
-    manufacturer_id: manufacturer.manufacturer_id,
-    catalog_url: catalogUrl,
-    memory_candidates: memoryCandidates,
-    experience_candidates: experienceRanking,
-  });
-
-  const g3 = evaluateGateG3(ccn.product?.candidates || []);
-  const gateG3 = {
-    decision: ccn.gate?.decision || g3.decision,
-    reason: ccn.gate?.reason || g3.reason,
-    match_confidence: ccn.gate?.match_confidence ?? g3.match_confidence,
-  };
-
-  if (gateG3.decision === "human_pick") {
-    return finishNeedsHuman({
-      hitl: "H3",
-      reason: gateG3.reason,
-      vision: cvo.vision,
-      product: ccn.product,
-      manufacturer: { ...manufacturer, catalog_url: catalogUrl },
-      placement: input?.placement,
-      g1,
-      gateG3,
-      memory: {
-        used: false,
-        similarity: topMemory?.similarity ?? null,
-        proposed_article: topMemory?.article ?? null,
-        fallback: Boolean(topMemory && topMemory.similarity >= MEMORY_HIT_MIN),
-      },
-      experience_ranking: experienceRanking,
-      livePath,
-      candidates: ccn.product?.candidates || [],
-    });
-  }
-
-  if (gateG3.decision === "fail") {
-    return finishNeedsHuman({
-      hitl: "H4",
-      reason: gateG3.reason,
-      vision: cvo.vision,
-      product: ccn.product,
-      manufacturer: { ...manufacturer, catalog_url: catalogUrl },
-      placement: input?.placement,
-      g1,
-      gateG3,
-      memory: {
-        used: false,
-        similarity: topMemory?.similarity ?? null,
-        proposed_article: topMemory?.article ?? null,
-        fallback: Boolean(topMemory && topMemory.similarity >= MEMORY_HIT_MIN),
-      },
-      experience_ranking: experienceRanking,
-      livePath,
-      candidates: ccn.product?.candidates || [],
-    });
-  }
-
-  return finishSuccess({
-    vision: cvo.vision,
-    product: {
-      ...ccn.product,
-      match_type: ccn.product?.match_type || (livePath ? ccn.product?.match_type : "ccn_live"),
-    },
-    manufacturer: { ...manufacturer, catalog_url: catalogUrl },
-    placement: input?.placement,
-    g1,
-    gateG3,
-    human_overrides: input?.human_overrides,
-    memory: {
-      used: false,
-      similarity: topMemory?.similarity ?? null,
-      proposed_article: topMemory?.article ?? null,
-      fallback: Boolean(topMemory && topMemory.similarity >= MEMORY_HIT_MIN),
-    },
-    store,
-    experience_ranking: experienceRanking,
-    livePath,
-  });
+    }),
+    evidence,
+  );
 }

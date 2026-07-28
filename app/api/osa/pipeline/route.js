@@ -14,6 +14,7 @@ export async function POST(request) {
       catalog_url: body?.catalog_url,
       placement: body?.placement,
       human_overrides: body?.human_overrides,
+      imagePublicUrl: body?.imagePublicUrl,
     });
 
     return Response.json(result);

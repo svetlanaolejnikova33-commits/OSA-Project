@@ -6,7 +6,6 @@
 export const PROVIDER_IDS = {
   MOCK: "mock",
   JINA: "jina",
-  GOOGLE_LENS: "google_lens",
 };
 
 /**

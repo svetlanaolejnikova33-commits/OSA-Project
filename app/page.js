@@ -22,6 +22,7 @@ import {
 } from "./lib/validateSemanticDraft";
 import { extractImagePalette } from "./lib/extractImagePalette";
 import { VisionAnalysisPanel } from "./components/VisionAnalysisPanel";
+import { isOsaOfficeEnabled, resolveKnownManufacturerId } from "./lib/osaOfficeUi";
 import { PlatformHeroBanner } from "./components/PlatformHeroBanner";
 import { AnalysisQualityCheckPanel } from "./components/AnalysisQualityCheckPanel";
 import { ProjectMemory } from "./components/project/ProjectMemory";
@@ -1530,6 +1531,10 @@ export default function Home() {
   const [showImagePromptDetails, setShowImagePromptDetails] = useState(false);
   const [savedVisuals, setSavedVisuals] = useState([]);
   const [semanticDraft, setSemanticDraft] = useState(null);
+  const [analyzeVisionJson, setAnalyzeVisionJson] = useState(null);
+  const [officePipelineResult, setOfficePipelineResult] = useState(null);
+  const [officePipelineLoading, setOfficePipelineLoading] = useState(false);
+  const [officePipelineError, setOfficePipelineError] = useState("");
   const [selectedAnalysisMode, setSelectedAnalysisMode] = useState("pro");
   const [resultAnalysisMode, setResultAnalysisMode] = useState("");
   const [analyzeSceneError, setAnalyzeSceneError] = useState("");
@@ -5276,6 +5281,10 @@ export default function Home() {
     setSelectedImagePreviewUrl(url);
     setSemanticDraft(null);
     semanticDraftRef.current = null;
+    setAnalyzeVisionJson(null);
+    setOfficePipelineResult(null);
+    setOfficePipelineLoading(false);
+    setOfficePipelineError("");
     setActiveSavedAnalysisRecordId("");
     setActiveAnalysisRecordId("");
     setSavedDocumentSnapshot("");
@@ -5408,6 +5417,10 @@ export default function Home() {
     setDemoFallbackNotice("");
     setIsAnalyzeResultVisible(false);
     setAnalysisSaveFeedback(null);
+    setAnalyzeVisionJson(null);
+    setOfficePipelineResult(null);
+    setOfficePipelineLoading(false);
+    setOfficePipelineError("");
 
     try {
       const createdAt = new Date().toISOString();
@@ -5441,6 +5454,10 @@ export default function Home() {
         if (isDemoFallbackEnabled() && isOpenAiGeoBlockError(errorMessage)) {
           setSemanticDraft(null);
           semanticDraftRef.current = null;
+          setAnalyzeVisionJson(null);
+          setOfficePipelineResult(null);
+          setOfficePipelineLoading(false);
+          setOfficePipelineError("");
           setVisualRecommendationRows([]);
           setVisualProductCandidates([]);
           visualProductCandidatesRef.current = [];
@@ -5475,6 +5492,61 @@ export default function Home() {
     logVisionClassificationDiagnostic(nextDraft, { context: "analyze-image-complete" });
     window.setTimeout(() => setIsAnalyzeResultVisible(true), 0);
     scheduleBudgetDraftCreate();
+
+      if (isOsaOfficeEnabled()) {
+        const visionFromAnalyze =
+          payload?.vision && typeof payload.vision === "object" ? payload.vision : null;
+        setAnalyzeVisionJson(visionFromAnalyze);
+        if (visionFromAnalyze) {
+          setOfficePipelineLoading(true);
+          setOfficePipelineError("");
+          setOfficePipelineResult(null);
+          try {
+            const knownManufacturerId = resolveKnownManufacturerId({});
+            const officeBody = { vision: visionFromAnalyze };
+            if (knownManufacturerId) {
+              officeBody.manufacturer_id = knownManufacturerId;
+            }
+            const previewUrl =
+              typeof selectedImagePreviewUrl === "string" ? selectedImagePreviewUrl.trim() : "";
+            if (/^https?:\/\//i.test(previewUrl) && !/^https?:\/\/(localhost|127\.0\.0\.1)/i.test(previewUrl)) {
+              officeBody.imagePublicUrl = previewUrl;
+            }
+            const officeResponse = await fetch("/api/osa/pipeline", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(officeBody),
+            });
+            const officePayload = await officeResponse.json().catch(() => ({}));
+            if (!officeResponse.ok) {
+              setOfficePipelineResult(null);
+              setOfficePipelineError(
+                typeof officePayload?.error === "string"
+                  ? officePayload.error
+                  : "OSA Office pipeline failed.",
+              );
+            } else {
+              setOfficePipelineResult(officePayload);
+              setOfficePipelineError("");
+            }
+          } catch (officeError) {
+            setOfficePipelineResult(null);
+            setOfficePipelineError(
+              officeError instanceof Error ? officeError.message : "OSA Office pipeline failed.",
+            );
+          } finally {
+            setOfficePipelineLoading(false);
+          }
+        } else {
+          setOfficePipelineResult(null);
+          setOfficePipelineError(
+            typeof payload?.error === "string"
+              ? payload.error
+              : "Vision JSON отсутствует — Office pipeline не запускался.",
+          );
+          setOfficePipelineLoading(false);
+        }
+      }
 
       if (isIndexedDbAvailable()) {
         if (analyzeImageBase64) {
@@ -7699,6 +7771,9 @@ export default function Home() {
                       visualProductCandidatesLoading={visualProductCandidatesLoading}
                       visualProductCandidatesError={visualProductCandidatesError}
                       placement="center"
+                      officeResult={officePipelineResult}
+                      officeLoading={officePipelineLoading}
+                      officeError={officePipelineError}
                     />
                   ) : (
                     <div style={aiEmptyStateStyle}>
