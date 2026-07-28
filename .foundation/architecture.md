@@ -76,7 +76,7 @@ User request → `/api/osa/pipeline` → CVO → Visual Memory → Experience Me
 
 Этот раздел фиксирует факт dual-path, а не предлагает новую архитектуру.
 
-Специалисты AI Office (принятые): CVO, CCN, Spec Assembler; CDIO — утверждён в workflow-тендерах, в hot path Core не включён.
+Специалисты AI Office в текущих границах: CVO, CCN, Spec Assembler. CDIO / BIM не входят в текущие границы OSA.
 
 ---
 
