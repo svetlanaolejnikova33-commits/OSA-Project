@@ -46,17 +46,36 @@ export async function runEvidenceDiscovery(input = {}) {
 
   const searchQuery = asString(vision?.category);
 
-  const raw = await fetchMatches({
-    imagePublicUrl,
-    searchQuery,
-    limit: 12,
-  });
+  let raw;
+  try {
+    raw = await fetchMatches({
+      imagePublicUrl,
+      searchQuery,
+      limit: 12,
+    });
+  } catch (error) {
+    return buildEvidenceDiscoveryResult({
+      status: "error",
+      vision_ref,
+      candidates: [],
+      reason:
+        "Evidence Discovery provider failed: " +
+        (error instanceof Error ? error.message : "unknown error"),
+    });
+  }
 
   if (!raw?.ok) {
     const reason = asString(raw?.reason) || "Evidence Discovery returned no matches.";
-    const isError = /not configured|failed|requires a public image|unavailable/i.test(reason);
+    const status =
+      raw?.status === "empty"
+        ? "empty"
+        : raw?.status === "error"
+          ? "error"
+          : /not configured|failed|requires a public image|unavailable/i.test(reason)
+            ? "error"
+            : "empty";
     return buildEvidenceDiscoveryResult({
-      status: isError ? "error" : "empty",
+      status,
       vision_ref,
       candidates: [],
       reason,
@@ -66,7 +85,7 @@ export async function runEvidenceDiscovery(input = {}) {
   const candidates = normalizeEvidenceCandidates(raw.matches, {
     vision,
     limit,
-    source,
+    source: asString(raw?.source) || source,
   });
 
   if (!candidates.length) {

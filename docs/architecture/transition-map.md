@@ -3,8 +3,12 @@
 File-grounded migration to one AI Office decision path. Evidence Discovery is an approved mandatory stage between Memory and Office Validation.
 
 - Canonical: `/api/osa/pipeline`
+- Canonical production roadmap: [OSA Core V2 — Evidence-to-Estimate Production Roadmap v1.0](./osa-core-v2-evidence-to-estimate-roadmap-v1.md)
 - Evidence Discovery approved
 - Three U's gate
+
+> **Roadmap baseline**
+> The completed UI → Office wiring remains the migration prerequisite. The canonical production Roadmap re-baselines the next implementation unit, Evidence Discovery MVP, as Slice 1. Historical migration numbering below is retained for file-grounded traceability.
 
 > **Constraint preserved**  
 > Target decision path is only the AI Office pipeline. Legacy UI remains until each slice proves replacement. No deletions before replacement works.
@@ -14,6 +18,12 @@ File-grounded migration to one AI Office decision path. Evidence Discovery is an
 
 > **manufacturer_id**  
 > manufacturer_id is not assumed known a priori. It emerges from Evidence Candidates + Office Validation accept (or an already reliable explicit id, which skips Evidence Discovery).
+
+> **Manufacturer-neutral platform rule**
+> A concrete manufacturer is data and may serve as a Proof of Value scenario; it is not an architectural entity, platform capability, or migration slice of OSA. Platform stages and contracts use universal concepts: Manufacturer Registry, Official Source Bindings, Product Index, Media Index, Visual Index, Internal Registry Retrieval, Evidence Discovery, CCN, Spec Assembler, and Estimate. Manufacturer-specific behavior is allowed only inside a concrete source adapter, test data, or explicitly labeled PoV acceptance.
+
+> **Internal Registry Retrieval qualification**
+> Internal Registry Retrieval is the universal capability for retrieving candidates from Registry-backed official catalog data. **Platform DoD:** common source, product, media, visual-index, retrieval, and CCN contracts work without brand-specific branches. **PoV acceptance:** the mechanism is proven on the first real Registry-backed manufacturer; the current first PoV is Modelux through its concrete source adapter. The PoV manufacturer does not name or define the platform slice or its contracts.
 
 | Metric | Value |
 | --- | --- |
@@ -35,7 +45,7 @@ File-grounded migration to one AI Office decision path. Evidence Discovery is an
 | Discovery | page.js → fetchVisualProductCandidates / buildVisualRecommendationPipeline |
 | Visual search | app/lib/visualProductDiscovery.js → POST /api/visual-search |
 | Jina / Lens | visualSearch/providers/JinaProvider.js · GoogleLensProvider.js |
-| Registry catalog | app/lib/registry/fetchVisualProductCandidates.js → /api/registry/modelux-catalog |
+| First Registry-backed Official Catalog (Modelux source adapter) | app/lib/registry/fetchVisualProductCandidates.js → /api/registry/modelux-catalog |
 | SKU / budget | fetchSkuMatchesForBudgetDraft → /api/registry/resolve-sku |
 | Basket | projectSelectionStore.addProjectSelectionItem |
 | Estimate UI | StructuredEstimateSection → buildStructuredEstimateRows |
@@ -93,7 +103,7 @@ Status · responsibility · consumers · target · dependency · deletion risk. 
 | app/components/StructuredEstimateSection.js | ADAPT | Estimate table from basket | VisionAnalysisPanel | Render Spec Assembler lines | Slice 3 | Med |
 | app/lib/projectSelectionStore.js | ADAPT | Basket + client estimate | page, ProjectSelection, StructuredEstimate | Optional selection only; not estimate truth | Slice 3–4 | Med |
 | app/lib/supplierSourcesRegistry.js | KEEP | Brand registry data | resolveManufacturerCatalog, UI suppliers | Shared registry data | None | Low |
-| app/lib/registry/parseModeluxCatalogHtml.js | KEEP | HTML catalog parse | live CCN + registry UI | Shared Modelux helper | None | Low |
+| app/lib/registry/parseModeluxCatalogHtml.js | KEEP | First PoV source-adapter HTML parse | live CCN + registry UI | Official catalog parser helper (Modelux adapter) | None | Low |
 | app/lib/visualProductDiscovery.js | RETIRE | Legacy discovery pipeline | page.js | Replace with CCN | After Slice 4 | High if early |
 | app/lib/registry/fetchVisualProductCandidates.js | RETIRE | Registry visual candidates | page.js | CCN replaces | After Slice 4 | Med |
 | app/api/visual-search/route.js | RETIRE | Jina/Lens search API | visualProductDiscovery | No Office consumer | Slice 5 | Med |
@@ -131,7 +141,7 @@ Status · responsibility · consumers · target · dependency · deletion risk. 
 - Evidence Discovery → Evidence Candidates (stable contract; Lens = MVP adapter only)
 - Registry + CCN consume candidates → Official Product (only after G3 accept)
 - Spec / Estimate / Designer Summary unchanged contracts
-- live CCN → parseModeluxCatalogHtml + resolveManufacturerCatalog
+- live CCN → manufacturer-specific official source adapter + resolveManufacturerCatalog (current first PoV adapter: parseModeluxCatalogHtml)
 
 ### High-risk premature deletes
 

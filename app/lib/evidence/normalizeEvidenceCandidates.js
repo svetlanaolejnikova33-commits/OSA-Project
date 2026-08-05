@@ -26,6 +26,15 @@ function hostnameFromUrl(url) {
   }
 }
 
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Known domain → manufacturer_id overlays (MVP).
  * Keep narrow; Registry remains source of brand rows.
@@ -108,6 +117,7 @@ export function normalizeEvidenceCandidates(matches, options = {}) {
     const brand_raw = asString(raw.brand_raw);
     const position = Number(raw.position) || 99;
 
+    if (!isHttpUrl(page_url) || !domain) continue;
     const manufacturerId =
       resolveIdFromDomain(domain) || resolveIdFromBrandText(brand_raw, title);
     if (!manufacturerId) continue;
