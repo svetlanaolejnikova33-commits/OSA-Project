@@ -27,13 +27,16 @@ function brand({
   segment,
   status = "active",
   notes = "",
+  aliases = [],
+  sourceLinks = null,
 }) {
   return {
     id,
     brandName,
     categoryIds,
     segment,
-    sourceLinks: placeholderSourceLinks(),
+    aliases,
+    sourceLinks: sourceLinks || placeholderSourceLinks(),
     updatePolicy: placeholderUpdatePolicy(notes),
     status,
   };
@@ -51,6 +54,38 @@ function supplier({ id, supplierName, country, website, brands }) {
 
 export const SUPPLIER_SOURCES = [
   supplier({
+    id: "modelux",
+    supplierName: "Modelux",
+    country: "Russia",
+    website: "https://modelux.ru",
+    brands: [
+      brand({
+        id: "modelux",
+        brandName: "Modelux",
+        aliases: ["Моделюкс", "Modelight"],
+        categoryIds: ["lighting", "lighting.pendants", "lighting.floor_lamps", "lighting.wall_sconces"],
+        segment: "premium",
+        sourceLinks: {
+          collections: "https://modelux.ru/catalog/podvesnoi-svetilnik",
+          categoryCatalogs: {
+            pendant: "https://modelux.ru/catalog/podvesnoi-svetilnik",
+            floor: "https://modelux.ru/catalog/napolnyi-svetilnik",
+            wall: "https://modelux.ru/catalog/bra",
+            "lighting.pendants": "https://modelux.ru/catalog/podvesnoi-svetilnik",
+            "lighting.floor_lamps": "https://modelux.ru/catalog/napolnyi-svetilnik",
+            "lighting.wall_sconces": "https://modelux.ru/catalog/bra",
+          },
+          catalogPdf: "",
+          priceList: "",
+          mediaLibrary: "https://modelux.ru/storage/",
+          technicalData: "https://modelux.ru",
+          bim: "",
+          models3d: "",
+          api: "",
+        },
+      }),
+    ],
+  }),  supplier({
     id: "flos",
     supplierName: "FLOS",
     country: "Italy",

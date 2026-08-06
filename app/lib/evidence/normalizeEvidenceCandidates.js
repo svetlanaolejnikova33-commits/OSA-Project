@@ -2,8 +2,11 @@
  * Map provider-neutral visual matches → Registry manufacturer candidates.
  */
 
-import { resolveManufacturerCatalog } from "../ccn/resolveManufacturerCatalog";
-import { getAllSupplierBrands } from "../supplierSourcesRegistry";
+import {
+  getOfficialSourceBinding,
+  resolveManufacturerByDomain,
+  resolveManufacturerFromText,
+} from "../registry/manufacturerRegistry";
 import { EVIDENCE_SOURCE_EXTERNAL } from "./evidenceDiscoveryContract";
 
 function asString(value) {
@@ -35,50 +38,13 @@ function isHttpUrl(value) {
   }
 }
 
-/**
- * Known domain → manufacturer_id overlays (MVP).
- * Keep narrow; Registry remains source of brand rows.
- */
-const DOMAIN_MANUFACTURER_HINTS = Object.freeze({
-  "modelux.ru": "modelux",
-  "flos.com": "flos",
-  "artemide.com": "artemide",
-  "vibia.com": "vibia",
-  "vitra.com": "vitra",
-  "minotti.com": "minotti",
-  "grohe.com": "grohe",
-});
-
 function resolveIdFromDomain(domain) {
-  const host = asString(domain).toLowerCase();
-  if (!host) return "";
-  if (DOMAIN_MANUFACTURER_HINTS[host]) return DOMAIN_MANUFACTURER_HINTS[host];
-  for (const [hintHost, id] of Object.entries(DOMAIN_MANUFACTURER_HINTS)) {
-    if (host.endsWith(`.${hintHost}`) || host === hintHost) return id;
-  }
-  return "";
+  return resolveManufacturerByDomain(domain)?.manufacturer_id || "";
 }
 
 function resolveIdFromBrandText(brandRaw, title) {
-  const hay = normalizeToken(`${brandRaw} ${title}`);
-  if (!hay) return "";
-
-  if (/\bmodelux\b/.test(hay) || /\bмоделюкс\b/.test(hay)) return "modelux";
-
-  const brands = getAllSupplierBrands();
-  for (const brand of brands) {
-    const id = normalizeToken(brand.id);
-    const name = normalizeToken(brand.brandName);
-    if (id && (hay === id || hay.includes(` ${id} `) || hay.startsWith(`${id} `))) {
-      return asString(brand.id).toLowerCase();
-    }
-    if (name && name.length >= 3 && hay.includes(name)) {
-      return asString(brand.id).toLowerCase();
-    }
-  }
-  return "";
+  return resolveManufacturerFromText(`${brandRaw} ${title}`)?.manufacturer_id || "";
 }
-
 function categoryBonus(visionCategory, categoryIds) {
   const cat = normalizeToken(visionCategory);
   if (!cat || !Array.isArray(categoryIds) || !categoryIds.length) return 0;
@@ -122,7 +88,7 @@ export function normalizeEvidenceCandidates(matches, options = {}) {
       resolveIdFromDomain(domain) || resolveIdFromBrandText(brand_raw, title);
     if (!manufacturerId) continue;
 
-    const binding = resolveManufacturerCatalog(manufacturerId);
+    const binding = getOfficialSourceBinding(manufacturerId);
     if (!binding) continue;
 
     const evidenceItem = {

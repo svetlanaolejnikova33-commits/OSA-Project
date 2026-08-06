@@ -1,4 +1,5 @@
 import { getSkuFilterKeywords } from "./categorySkuKeywords";
+import { getOfficialSourceBinding } from "./manufacturerRegistry";
 import { parseModeluxStockXml } from "./parseModeluxStockXml";
 import {
   findManufacturerByBrandName,
@@ -49,7 +50,8 @@ export async function resolveSkuFromRegistry({ categoryId, brandName, limit = 5 
     return { ok: false, error: `Manufacturer not found for brand: ${brand}` };
   }
 
-  const rawPriceListUrl = manufacturer?.sourceLinks?.priceList || "";
+  const binding = getOfficialSourceBinding(manufacturer);
+  const rawPriceListUrl = binding?.sources?.price_list || "";
   const priceListUrl = unwrapRedirectUrl(String(rawPriceListUrl).trim());
 
   if (!priceListUrl || !/^https?:\/\//i.test(priceListUrl)) {
@@ -83,7 +85,8 @@ export async function resolveSkuFromRegistry({ categoryId, brandName, limit = 5 
 
   return {
     ok: true,
-    brandName: manufacturer.brandName,
+    brandName: binding?.brandName || manufacturer.brandName,
+    manufacturer_id: binding?.manufacturer_id || manufacturer.id,
     categoryId: catId,
     sourceUrl: priceListUrl,
     sourceType: "xml",

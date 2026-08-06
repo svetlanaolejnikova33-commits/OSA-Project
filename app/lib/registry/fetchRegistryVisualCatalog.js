@@ -3,18 +3,19 @@
  * HTML catalog first, then Google Sheets → stock.xml fallback.
  */
 
+import { parseModeluxCatalogHtml } from "./parseModeluxCatalogHtml";
 import {
-  MODELUX_FLOOR_LAMPS_CATALOG_URL,
-  MODELUX_PENDANTS_CATALOG_URL,
-  parseModeluxCatalogHtml,
-} from "./parseModeluxCatalogHtml";
+  getOfficialSourceBinding,
+  resolveOfficialCatalogUrl,
+} from "./manufacturerRegistry";
 import { resolveSkuFromRegistry } from "./resolveSkuFromRegistry";
 import { Agent, fetch as undiciFetch } from "undici";
 
-export { MODELUX_FLOOR_LAMPS_CATALOG_URL, MODELUX_PENDANTS_CATALOG_URL };
-
-const MODELUX_SITE = "https://modelux.ru";
-export const MODELUX_WALL_SCONCES_CATALOG_URL = `${MODELUX_SITE}/catalog/bra`;
+const MODELUX_BINDING = getOfficialSourceBinding("modelux");
+export const MODELUX_PENDANTS_CATALOG_URL = resolveOfficialCatalogUrl(MODELUX_BINDING, "lighting.pendants");
+export const MODELUX_FLOOR_LAMPS_CATALOG_URL = resolveOfficialCatalogUrl(MODELUX_BINDING, "lighting.floor_lamps");
+export const MODELUX_WALL_SCONCES_CATALOG_URL = resolveOfficialCatalogUrl(MODELUX_BINDING, "lighting.wall_sconces");
+const MODELUX_SITE = MODELUX_BINDING?.website || "";
 
 const FETCH_HEADERS = {
   "User-Agent":
@@ -35,12 +36,6 @@ const MODELUX_UNDICI_AGENT = new Agent({
   bodyTimeout: MODELUX_UNDICI_BODY_TIMEOUT_MS,
 });
 
-const MODELUX_CATALOG_BY_REGISTRY_CATEGORY = {
-  "lighting.pendants": MODELUX_PENDANTS_CATALOG_URL,
-  "lighting.floor_lamps": MODELUX_FLOOR_LAMPS_CATALOG_URL,
-  "lighting.wall_sconces": MODELUX_WALL_SCONCES_CATALOG_URL,
-};
-
 const MODELUX_BRAND_CANDIDATES = ["MODELUX", "МОДЕЛЮКС", "Modelux", "Modelight"];
 
 function asString(value) {
@@ -48,8 +43,7 @@ function asString(value) {
 }
 
 export function resolveModeluxCatalogUrl(registryCategoryId) {
-  const id = asString(registryCategoryId);
-  return MODELUX_CATALOG_BY_REGISTRY_CATEGORY[id] || null;
+  return resolveOfficialCatalogUrl(MODELUX_BINDING, asString(registryCategoryId)) || null;
 }
 
 async function fetchHtmlWithTimeout(url) {

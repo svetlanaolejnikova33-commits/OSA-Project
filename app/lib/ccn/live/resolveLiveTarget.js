@@ -4,10 +4,10 @@
  */
 
 import {
-  MODELUX_FLOOR_LAMPS_CATALOG_URL,
-  MODELUX_PENDANTS_CATALOG_URL,
-} from "../../registry/parseModeluxCatalogHtml";
-import { resolveManufacturerCatalog } from "../resolveManufacturerCatalog";
+  getOfficialSourceBinding,
+  isOfficialManufacturerUrl,
+  resolveOfficialCatalogUrl,
+} from "../../registry/manufacturerRegistry";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -36,33 +36,16 @@ function visionCategoryHint(vision) {
  */
 export function resolveCatalogUrlForVision(binding, vision) {
   if (!binding) return "";
-
-  const hint = visionCategoryHint(vision);
-  if (binding.manufacturer_id === "modelux") {
-    if (hint === "floor") return MODELUX_FLOOR_LAMPS_CATALOG_URL;
-    if (hint === "pendant" || hint === "unknown") {
-      return binding.catalog_url || MODELUX_PENDANTS_CATALOG_URL;
-    }
-  }
-  return asString(binding.catalog_url);
+  return resolveOfficialCatalogUrl(binding, visionCategoryHint(vision));
 }
 
-function hostnameOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
-  } catch {
-    return "";
-  }
-}
+
 
 /**
  * Confirm live page stays on the registry manufacturer domain.
  */
 export function assertRegistryDomain(binding, url) {
-  const pageHost = hostnameOf(url);
-  const websiteHost = hostnameOf(binding?.website || binding?.catalog_url || "");
-  if (!pageHost || !websiteHost) return false;
-  return pageHost === websiteHost || pageHost.endsWith(`.${websiteHost}`);
+  return isOfficialManufacturerUrl(binding, url);
 }
 
 /**
@@ -103,7 +86,7 @@ export function resolveLiveSearchTarget(input = {}) {
     };
   }
 
-  const binding = resolveManufacturerCatalog(manufacturerId);
+  const binding = getOfficialSourceBinding(manufacturerId);
   if (!binding) {
     return {
       ok: false,
