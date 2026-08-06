@@ -1104,6 +1104,7 @@ export function VisionAnalysisPanel({
         />
         <StructuredEstimateSection
           selectedProjectItems={selectedProjectItems}
+          officeResult={officeResult}
           projectKey={activeProjectKey}
           isDark={isDark}
           isMobile={isMobile}

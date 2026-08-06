@@ -78,6 +78,7 @@ import {
   readProjectSelectionItems,
   updateProjectSelectionItemStatus,
 } from "./lib/projectSelectionStore";
+import { resolveEstimateTruth } from "./lib/estimate/resolveEstimateTruth";
 import { buildVisualRecommendationPipeline, logVisionFixDiagnostic } from "./lib/visualProductDiscovery";
 import {
   logPipelineTraceProducts,
@@ -5837,17 +5838,26 @@ export default function Home() {
 
   const workspacePipelineCards = useMemo(() => {
     if (isAnalyzeMode) {
+      const budgetEstimateTruth = resolveEstimateTruth({
+        officeResult: officePipelineResult,
+        selectedProjectItems,
+        projectKey: activeProjectKey || stableSessionProjectKeyRef.current || "",
+      });
+      const hasCanonicalEstimate = budgetEstimateTruth.source === "spec_assembler";
       const aiPreview = semanticDraft
         ? `Разбор: ${ANALYSIS_MODE_LABELS_RU[panelAnalysisMode] || panelAnalysisMode}`
         : "Семантический разбор сцены и концепции";
       const bimPreview = semanticDraft?.sceneGraph
         ? "Структура сцены и редактируемые элементы"
         : "Основа для точных итераций, спецификаций и связок";
-      const budgetCategoryCount =
-        activeBudgetDraft?.normalizedSpecGroups?.length ||
+      const budgetCategoryCount = hasCanonicalEstimate
+        ? budgetEstimateTruth.rows.length
+        : activeBudgetDraft?.normalizedSpecGroups?.length ||
         semanticDraft?.specAnalysis?.productCategories?.length ||
         0;
-      const budgetBrandCount = (() => {
+      const budgetBrandCount = hasCanonicalEstimate
+        ? new Set(budgetEstimateTruth.rows.map((row) => row.brand).filter(Boolean)).size
+        : (() => {
         const names = new Set();
         for (const entry of Array.isArray(activeBudgetDraft?.normalizedSpecGroups)
           ? activeBudgetDraft.normalizedSpecGroups
@@ -5861,13 +5871,17 @@ export default function Home() {
         }
         return names.size;
       })();
-      const budgetTotal = activeBudgetDraft
-        ? sumPreviewBudgetRows(activeBudgetDraft.previewBudgetRows)
-        : 0;
-      const formatBudgetPreviewPrice = (value) => {
+      const budgetTotal = hasCanonicalEstimate
+        ? budgetEstimateTruth.total
+        : activeBudgetDraft
+          ? sumPreviewBudgetRows(activeBudgetDraft.previewBudgetRows)
+          : 0;
+      const formatBudgetPreviewPrice = (value, currency = "RUB", approximate = true) => {
+        if (value === "" || value == null) return "";
         const num = Number(value);
         if (!Number.isFinite(num) || num <= 0) return "";
-        return `≈ ${num.toLocaleString("ru-RU")} ₽`;
+        const suffix = currency === "RUB" ? "₽" : currency;
+        return `${approximate ? "≈ " : ""}${num.toLocaleString("ru-RU")}${suffix ? ` ${suffix}` : ""}`;
       };
       const budgetPreviewSublineParts = [];
       if (budgetCategoryCount > 0) {
@@ -5882,15 +5896,23 @@ export default function Home() {
           `${budgetBrandCount} ${budgetBrandCount === 1 ? "бренд" : budgetBrandCount < 5 ? "бренда" : "брендов"}`
         );
       }
-      const budgetPriceLabel = formatBudgetPreviewPrice(budgetTotal);
+      const budgetPriceLabel = formatBudgetPreviewPrice(
+        budgetTotal,
+        hasCanonicalEstimate ? budgetEstimateTruth.currency : "RUB",
+        !hasCanonicalEstimate
+      );
       if (budgetPriceLabel) budgetPreviewSublineParts.push(budgetPriceLabel);
-      const budgetPreview = activeBudgetDraft
+      const budgetPreview = hasCanonicalEstimate
+        ? "Официальная смета готова"
+        : activeBudgetDraft
         ? "Черновик готов"
         : semanticDraft?.specAnalysis
           ? "Черновик сметы ещё не создан"
           : "Ожидает анализа";
       const budgetPreviewSubline =
-        activeBudgetDraft && budgetPreviewSublineParts.length ? budgetPreviewSublineParts.join(" • ") : "";
+        (hasCanonicalEstimate || activeBudgetDraft) && budgetPreviewSublineParts.length
+          ? budgetPreviewSublineParts.join(" · ")
+          : "";
 
       return [
         {
@@ -5943,6 +5965,7 @@ export default function Home() {
               budgetDraft={activeBudgetDraft}
               onCreateBudgetDraft={handleCreateBudgetDraft}
               placement="budget"
+              officeResult={officePipelineResult}
               selectedProjectItems={selectedProjectItems}
               onAddToProjectSelection={handleAddToProjectSelection}
               onProjectSelectionStatusChange={handleProjectSelectionStatusChange}
@@ -6034,6 +6057,7 @@ export default function Home() {
     isMobile,
     isAnalyzeResultVisible,
     activeBudgetDraft,
+    officePipelineResult,
     selectedProjectItems,
     visualRecommendationRows,
     visualRecommendationsLoading,

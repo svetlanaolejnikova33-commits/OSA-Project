@@ -1,16 +1,15 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import {
-  buildStructuredEstimateRows,
-  sumStructuredEstimateRows,
-} from "../lib/projectSelectionStore";
+import { resolveEstimateTruth } from "../lib/estimate/resolveEstimateTruth";
 
-function formatPrice(value, withApprox = true) {
+function formatPrice(value, currency = "RUB", withApprox = true) {
+  if (value === "" || value == null) return "—";
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return "—";
   const formatted = num.toLocaleString("ru-RU");
-  return withApprox ? `≈ ${formatted} ₽` : `${formatted} ₽`;
+  const suffix = currency === "RUB" ? "₽" : currency;
+  return `${withApprox ? "≈ " : ""}${formatted}${suffix ? ` ${suffix}` : ""}`;
 }
 
 function sectionLabelStyle(isDark) {
@@ -37,19 +36,22 @@ function cellStyle(isDark, align = "left") {
 
 export const StructuredEstimateSection = memo(function StructuredEstimateSection({
   selectedProjectItems,
+  officeResult = null,
   projectKey = "",
   isDark,
   isMobile = false,
 }) {
-  const estimateRows = useMemo(
-    () => buildStructuredEstimateRows(selectedProjectItems, projectKey),
-    [selectedProjectItems, projectKey]
+  const estimateTruth = useMemo(
+    () => resolveEstimateTruth({ officeResult, selectedProjectItems, projectKey }),
+    [officeResult, selectedProjectItems, projectKey]
   );
-  const total = useMemo(() => sumStructuredEstimateRows(estimateRows), [estimateRows]);
+  const estimateRows = estimateTruth.rows;
+  const total = estimateTruth.total;
+  const canonical = estimateTruth.source === "spec_assembler";
 
   return (
     <div style={{ marginTop: "18px" }}>
-      <div style={sectionLabelStyle(isDark)}>Итоговая смета</div>
+      <div style={sectionLabelStyle(isDark)}>{canonical ? "Официальная смета · Spec Assembler" : "Итоговая смета"}</div>
       <div
         style={{
           fontSize: "13px",
@@ -59,7 +61,7 @@ export const StructuredEstimateSection = memo(function StructuredEstimateSection
         }}
       >
         {estimateRows.length
-          ? `${estimateRows.length} ${estimateRows.length === 1 ? "позиция" : estimateRows.length < 5 ? "позиции" : "позиций"} • ${formatPrice(total)}`
+          ? `${estimateRows.length} ${estimateRows.length === 1 ? "позиция" : estimateRows.length < 5 ? "позиции" : "позиций"} • ${formatPrice(total, estimateTruth.currency, !canonical)}`
           : "0 позиций • —"}
       </div>
 
@@ -71,7 +73,9 @@ export const StructuredEstimateSection = memo(function StructuredEstimateSection
             color: isDark ? "rgba(243,238,231,0.58)" : "rgba(110,106,102,0.78)",
           }}
         >
-          Отметьте позиции как «В смете», чтобы сформировать итоговую таблицу.
+          {canonical
+            ? "Spec Assembler не создал строку сметы. Basket fallback отключён для подтверждённого результата."
+            : "Отметьте позиции как «В смете», чтобы сформировать итоговую таблицу."}
         </div>
       ) : isMobile ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -95,8 +99,8 @@ export const StructuredEstimateSection = memo(function StructuredEstimateSection
                 <span>
                   {row.quantity} {row.unit}
                 </span>
-                <span>{formatPrice(row.price, false)}</span>
-                <span style={{ fontWeight: 600 }}>{formatPrice(row.total, false)}</span>
+                <span>{formatPrice(row.price, row.currency || estimateTruth.currency, false)}</span>
+                <span style={{ fontWeight: 600 }}>{formatPrice(row.total, row.currency || estimateTruth.currency, false)}</span>
               </div>
             </div>
           ))}
@@ -150,8 +154,8 @@ export const StructuredEstimateSection = memo(function StructuredEstimateSection
                   <td style={cellStyle(isDark, "right")}>
                     {row.quantity} {row.unit}
                   </td>
-                  <td style={cellStyle(isDark, "right")}>{formatPrice(row.price, false)}</td>
-                  <td style={{ ...cellStyle(isDark, "right"), fontWeight: 600 }}>{formatPrice(row.total, false)}</td>
+                  <td style={cellStyle(isDark, "right")}>{formatPrice(row.price, row.currency || estimateTruth.currency, false)}</td>
+                  <td style={{ ...cellStyle(isDark, "right"), fontWeight: 600 }}>{formatPrice(row.total, row.currency || estimateTruth.currency, false)}</td>
                 </tr>
               ))}
             </tbody>
