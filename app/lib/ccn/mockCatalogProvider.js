@@ -97,24 +97,6 @@ export const MOCK_CATALOG_BY_MANUFACTURER = Object.freeze({
 
   modelux: Object.freeze([
     Object.freeze({
-      article: "MD.8024.01FL",
-      title: "Modelux Modemodern Floor Lamp — Aged Brass",
-      price: 45900,
-      currency: "RUB",
-      url: "https://modelux.ru/catalog/product/md-8024-01fl",
-      specifications: Object.freeze({
-        height_mm: "1650",
-        shade: "fabric",
-        lamp: "E27",
-      }),
-      category: "floor lamp",
-      mounting: "floor",
-      material: "brass",
-      finish: "aged brass",
-      style: "modern",
-      shape: "cylindrical",
-    }),
-    Object.freeze({
       article: "MD.6102.AB",
       title: "Modelux Pendant Cylinder — Aged Brass",
       price: 28700,

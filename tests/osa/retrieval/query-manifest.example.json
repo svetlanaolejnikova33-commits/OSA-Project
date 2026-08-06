@@ -1,0 +1,8 @@
+{
+  "schema_version": "osa.retrieval-query-manifest.v1",
+  "query_image_path": "C:/absolute/path/to/independent-full-scene-query.jpg",
+  "mime_type": "image/jpeg",
+  "top_k": 5,
+  "gold_article": null,
+  "note": "The query filename, metadata and OCR are not retrieval inputs. A null gold_article reports unavailable_no_gold_set."
+}
