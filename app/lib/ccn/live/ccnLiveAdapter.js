@@ -4,17 +4,17 @@
  */
 
 import { randomUUID } from "crypto";
-import { validateVisionJson } from "../../visionJsonContract";
-import { createBrowserRuntimeFromEnv } from "./browserRuntime";
+import { validateVisionJson } from "../../visionJsonContract.js";
+import { createBrowserRuntimeFromEnv } from "./browserRuntime.js";
 import {
   CcnLiveNotConfiguredError,
   getCcnBrowserEnv,
   getCcnLiveEnvStatus,
   isCcnLiveEnabled,
-} from "./env";
-import { runLiveProductSearch } from "./liveProductSearch";
-import { normalizeCcnLiveError } from "./normalizeError";
-import { resolveLiveSearchTarget } from "./resolveLiveTarget";
+} from "./env.js";
+import { runLiveProductSearch } from "./liveProductSearch.js";
+import { normalizeCcnLiveError } from "./normalizeError.js";
+import { resolveLiveSearchTarget } from "./resolveLiveTarget.js";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";

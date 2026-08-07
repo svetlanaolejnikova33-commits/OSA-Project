@@ -1,12 +1,12 @@
 import OpenAI from "openai";
-import { mapSemanticDraftToVisionJson } from "../../lib/mapSemanticDraftToVisionJson";
+import { mapSemanticDraftToVisionJson } from "../../lib/mapSemanticDraftToVisionJson.js";
 import {
   extractJsonObject,
   getSemanticDraftJsonSchema,
   normalizeVisionRequestMode,
   validateSemanticDraft,
-} from "../../lib/validateSemanticDraft";
-import { validateVisionJson } from "../../lib/visionJsonContract";
+} from "../../lib/validateSemanticDraft.js";
+import { validateVisionJson } from "../../lib/visionJsonContract.js";
 
 const VISION_MODEL = "gpt-4o";
 

@@ -1,4 +1,4 @@
-import { getConceptDNA } from "./styleConsistencyUtils";
+import { getConceptDNA } from "./styleConsistencyUtils.js";
 
 const PACKAGE_MODES = new Set(["controlled_text_to_image", "future_image_to_image"]);
 const PACKAGE_STATUSES = new Set(["draft", "ready", "generating", "completed", "failed", "archived"]);

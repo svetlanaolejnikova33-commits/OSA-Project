@@ -12,8 +12,8 @@ import {
   getCcnLiveEnvStatus,
   isCcnHeadless,
   requireCcnLiveEnv,
-} from "./env";
-import { normalizeCcnLiveError } from "./normalizeError";
+} from "./env.js";
+import { normalizeCcnLiveError } from "./normalizeError.js";
 
 export const DEFAULT_SESSION_TIMEOUT_MS = 90_000;
 export const DEFAULT_RETRY_ATTEMPTS = 1; // one retry after the first attempt

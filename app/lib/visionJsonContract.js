@@ -1,4 +1,4 @@
-import { asConfidence, extractJsonObject } from "./validateSemanticDraft";
+import { asConfidence, extractJsonObject } from "./validateSemanticDraft.js";
 
 /** Required string attribute keys on a Vision JSON object (Tender #1 / #4). */
 export const VISION_JSON_ATTRIBUTE_KEYS = Object.freeze([
@@ -175,7 +175,7 @@ export function normalizeVisionJson(input) {
     return null;
   }
 
-  /** @type {import("./visionJsonContract").VisionJson} */
+  /** @type {import("./visionJsonContract.js").VisionJson} */
   const vision = {
     category: asTrimmedString(source.category),
     mounting: asTrimmedString(source.mounting),
@@ -209,7 +209,7 @@ export function normalizeVisionJson(input) {
  * Validate Vision JSON. Returns normalized object + errors (empty when valid).
  *
  * @param {unknown} input
- * @returns {{ ok: boolean, vision: import("./visionJsonContract").VisionJson | null, errors: string[] }}
+ * @returns {{ ok: boolean, vision: import("./visionJsonContract.js").VisionJson | null, errors: string[] }}
  */
 export function validateVisionJson(input) {
   const errors = [];
@@ -252,7 +252,7 @@ export function validateVisionJson(input) {
 
 /**
  * @param {unknown} value
- * @returns {value is import("./visionJsonContract").VisionJson}
+ * @returns {value is import("./visionJsonContract.js").VisionJson}
  */
 export function isVisionJson(value) {
   const result = validateVisionJson(value);

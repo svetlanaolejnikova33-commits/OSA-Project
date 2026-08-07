@@ -1,4 +1,4 @@
-import { asConfidence } from "../validateSemanticDraft";
+import { asConfidence } from "../validateSemanticDraft.js";
 
 const FIELD_WEIGHTS = Object.freeze({
   category: 0.3,
@@ -63,7 +63,7 @@ export function fieldSimilarity(visionValue, productValue) {
 /**
  * Score one product against Vision JSON.
  *
- * @param {import("../visionJsonContract").VisionJson} vision
+ * @param {import("../visionJsonContract.js").VisionJson} vision
  * @param {object} product
  * @returns {{ score: number, fieldScores: Record<string, number> }}
  */
@@ -86,7 +86,7 @@ export function scoreProductAgainstVision(vision, product) {
 /**
  * Rank mock catalog products against Vision JSON (deterministic descending score, then article).
  *
- * @param {import("../visionJsonContract").VisionJson} vision
+ * @param {import("../visionJsonContract.js").VisionJson} vision
  * @param {object[]} products
  */
 export function rankCatalogMatches(vision, products) {

@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { parseModeluxCatalogHtml } from "../../registry/parseModeluxCatalogHtml";
+import { parseModeluxCatalogHtml } from "../../registry/parseModeluxCatalogHtml.js";
 
 export const LiveProductExtractSchema = z.object({
   article: z.string().nullable(),

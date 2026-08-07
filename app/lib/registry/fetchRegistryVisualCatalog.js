@@ -3,12 +3,12 @@
  * HTML catalog first, then Google Sheets → stock.xml fallback.
  */
 
-import { parseModeluxCatalogHtml } from "./parseModeluxCatalogHtml";
+import { parseModeluxCatalogHtml } from "./parseModeluxCatalogHtml.js";
 import {
   getOfficialSourceBinding,
   resolveOfficialCatalogUrl,
-} from "./manufacturerRegistry";
-import { resolveSkuFromRegistry } from "./resolveSkuFromRegistry";
+} from "./manufacturerRegistry.js";
+import { resolveSkuFromRegistry } from "./resolveSkuFromRegistry.js";
 import { Agent, fetch as undiciFetch } from "undici";
 
 const MODELUX_BINDING = getOfficialSourceBinding("modelux");

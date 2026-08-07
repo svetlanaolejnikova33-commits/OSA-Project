@@ -1,4 +1,4 @@
-import { getCategoryIdsForSheet, LIGHTING_SHEET_NAME } from "./categoryBridge";
+import { getCategoryIdsForSheet, LIGHTING_SHEET_NAME } from "./categoryBridge.js";
 
 const COLUMN_ALIASES = {
   id: ["id"],

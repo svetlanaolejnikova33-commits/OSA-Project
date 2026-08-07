@@ -1,4 +1,4 @@
-import { LIGHTING_SHEET_NAME } from "./categoryBridge";
+import { LIGHTING_SHEET_NAME } from "./categoryBridge.js";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
 

@@ -1,6 +1,6 @@
-import { normalizeLightingSheetRows } from "./normalizeSheetRow";
-import { readLightingSheetRows } from "./sheetsClient";
-import { setRegistryCache } from "./registryCache";
+import { normalizeLightingSheetRows } from "./normalizeSheetRow.js";
+import { readLightingSheetRows } from "./sheetsClient.js";
+import { setRegistryCache } from "./registryCache.js";
 
 export async function syncLightingTab() {
   const { rows, sheetName, source } = await readLightingSheetRows();

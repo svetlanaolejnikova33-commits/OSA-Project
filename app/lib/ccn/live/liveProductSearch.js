@@ -3,8 +3,8 @@
  * Deterministic navigation + structured extraction. No mock product cards.
  */
 
-import { evaluateGateG3 } from "../gateG3";
-import { buildLiveSearchTerms } from "./buildLiveSearchTerms";
+import { evaluateGateG3 } from "../gateG3.js";
+import { buildLiveSearchTerms } from "./buildLiveSearchTerms.js";
 import {
   LiveProductExtractSchema,
   buildExtractInstruction,
@@ -12,9 +12,9 @@ import {
   extractProductFromHtml,
   parsePrice,
   readPageHtml,
-} from "./extractLiveProduct";
-import { assertRegistryDomain } from "./resolveLiveTarget";
-import { scoreLiveCandidate } from "./scoreLiveCandidate";
+} from "./extractLiveProduct.js";
+import { assertRegistryDomain } from "./resolveLiveTarget.js";
+import { scoreLiveCandidate } from "./scoreLiveCandidate.js";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";

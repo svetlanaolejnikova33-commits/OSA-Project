@@ -1,4 +1,4 @@
-import { getRegistryCategoryById, getRegistryParentCategory } from "./supplierRegistry";
+import { getRegistryCategoryById, getRegistryParentCategory } from "./supplierRegistry.js";
 
 const UNKNOWN_ZONE_ID = "unknown_zone";
 const DEFAULT_CONFIDENCE = 0.5;

@@ -35,7 +35,7 @@ const CATEGORY_TERMS = Object.freeze({
 });
 
 /**
- * @param {import("../../visionJsonContract").VisionJson} vision
+ * @param {import("../../visionJsonContract.js").VisionJson} vision
  * @returns {{
  *   primaryQuery: string,
  *   secondaryQueries: string[],

@@ -1,12 +1,12 @@
-import { getSkuFilterKeywords } from "./categorySkuKeywords";
-import { getOfficialSourceBinding } from "./manufacturerRegistry";
-import { parseModeluxStockXml } from "./parseModeluxStockXml";
+import { getSkuFilterKeywords } from "./categorySkuKeywords.js";
+import { getOfficialSourceBinding } from "./manufacturerRegistry.js";
+import { parseModeluxStockXml } from "./parseModeluxStockXml.js";
 import {
   findManufacturerByBrandName,
   getRegistryCacheSnapshot,
   hasRegistryCache,
-} from "./registryCache";
-import { syncLightingTab } from "./syncLightingTab";
+} from "./registryCache.js";
+import { syncLightingTab } from "./syncLightingTab.js";
 
 function unwrapRedirectUrl(url) {
   try {

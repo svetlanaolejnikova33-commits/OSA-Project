@@ -3,14 +3,14 @@
   deriveEditableObjectsFromSceneGraph,
   normalizeEditableObjects,
   stabilizeEditableObjects,
-} from "./editableObjectsUtils";
-import { normalizeSceneGraph } from "./sceneGraphUtils";
+} from "./editableObjectsUtils.js";
+import { normalizeSceneGraph } from "./sceneGraphUtils.js";
 import {
   attachStyleConsistencyImpactToEditableObjects,
   normalizeStyleConsistency,
-} from "./styleConsistencyUtils";
-import { deriveDesignMutations, normalizeDesignMutations } from "./designMutationUtils";
-import { normalizeGenerationPackages } from "./generationPackageUtils";
+} from "./styleConsistencyUtils.js";
+import { deriveDesignMutations, normalizeDesignMutations } from "./designMutationUtils.js";
+import { normalizeGenerationPackages } from "./generationPackageUtils.js";
 
 export const SPACE_TYPE_VALUES = [
   "kitchen",

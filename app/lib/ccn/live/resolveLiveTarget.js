@@ -7,7 +7,7 @@ import {
   getOfficialSourceBinding,
   isOfficialManufacturerUrl,
   resolveOfficialCatalogUrl,
-} from "../../registry/manufacturerRegistry";
+} from "../../registry/manufacturerRegistry.js";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";

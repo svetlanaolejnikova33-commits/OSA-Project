@@ -3,7 +3,7 @@
  * No category-specific synonym tables; uses Vision output text as source of truth.
  */
 
-import { resolveSceneObjectTypeFromSceneGraph } from "../sceneObjectRegistryRouting";
+import { resolveSceneObjectTypeFromSceneGraph } from "../sceneObjectRegistryRouting.js";
 
 const FIELD_WEIGHTS = {
   objectType: 22,

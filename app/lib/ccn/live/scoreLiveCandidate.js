@@ -3,8 +3,8 @@
  * Style alone is never sufficient. Critical construction conflicts reduce confidence strongly.
  */
 
-import { asConfidence } from "../../validateSemanticDraft";
-import { fieldSimilarity } from "../matchEngine";
+import { asConfidence } from "../../validateSemanticDraft.js";
+import { fieldSimilarity } from "../matchEngine.js";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -30,7 +30,7 @@ function hasAny(haystack, patterns) {
 }
 
 /**
- * @param {import("../../visionJsonContract").VisionJson} vision
+ * @param {import("../../visionJsonContract.js").VisionJson} vision
  * @param {{
  *   title?: string | null,
  *   article?: string | null,

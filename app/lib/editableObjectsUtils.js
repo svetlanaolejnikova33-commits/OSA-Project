@@ -1,4 +1,4 @@
-import { getRegistryCategoryById, getRegistryParentCategory } from "./supplierRegistry";
+import { getRegistryCategoryById, getRegistryParentCategory } from "./supplierRegistry.js";
 
 const DEFAULT_CONFIDENCE = 0.5;
 const LEVELS = new Set(["low", "medium", "high"]);

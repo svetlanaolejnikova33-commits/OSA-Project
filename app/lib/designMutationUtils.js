@@ -1,4 +1,4 @@
-import { getConceptDNA } from "./styleConsistencyUtils";
+import { getConceptDNA } from "./styleConsistencyUtils.js";
 
 const MUTATION_TYPES = new Set([
   "style_shift",

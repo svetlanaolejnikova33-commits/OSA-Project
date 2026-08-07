@@ -1,6 +1,6 @@
 import { readFile } from "fs/promises";
 import { resolve } from "path";
-import { buildOfficialCatalogIndexes } from "../../app/lib/catalog/buildOfficialCatalogIndexes.js";
+import { buildOfficialCatalogIndexes, waitForOfficialCatalogQuerySlot } from "../../app/lib/catalog/buildOfficialCatalogIndexes.js";
 import { createJinaClipVisualEmbeddingAdapter } from "../../app/lib/embeddings/adapters/jinaClipVisualEmbeddingAdapter.js";
 import { createModeluxOfficialCatalogAdapter } from "../../app/lib/registry/adapters/modeluxOfficialCatalogAdapter.js";
 import { runInternalRegistryRetrieval } from "../../app/lib/retrieval/internalRegistryRetrieval.js";
@@ -38,13 +38,17 @@ const imageBase64 = imageBytes.toString("base64");
 const embeddingProvider = createJinaClipVisualEmbeddingAdapter();
 const sourceAdapter = createModeluxOfficialCatalogAdapter({ limit: catalogLimit });
 const indexes = await buildOfficialCatalogIndexes({ sourceAdapter, embeddingProvider });
+const query_throttle_wait_ms = await waitForOfficialCatalogQuerySlot(indexes);
+const retrievalStartedAt = Date.now();
 const candidates = await runInternalRegistryRetrieval({
   query: { imageBase64, mimeType: "image/jpeg" },
   indexes,
   embeddingProvider,
   topK,
 });
+const retrieval_ms = Date.now() - retrievalStartedAt;
 
+const ccnStartedAt = Date.now();
 const response = await analyzeImage(new Request("http://localhost/api/analyze-image", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -58,6 +62,7 @@ const validated = await validateLivePovRetrievalCandidates({
   vision: analysis.vision,
   liveNavigator,
 });
+const ccn_ms = Date.now() - ccnStartedAt;
 const accepted = validated.find((candidate) => candidate.ccn_g3.outcome === "accepted") || null;
 
 console.log(JSON.stringify({
@@ -81,6 +86,13 @@ console.log(JSON.stringify({
     provider_id: indexes.visual_index.provider_id,
     model_id: indexes.visual_index.model_id,
     model_version: indexes.visual_index.model_version,
+  },
+  cache: indexes.cache,
+  performance: {
+    ...indexes.performance,
+    query_throttle_wait_ms,
+    retrieval_ms,
+    ccn_ms,
   },
   top_k: validated.map((candidate) => ({
     rank: candidate.rank,

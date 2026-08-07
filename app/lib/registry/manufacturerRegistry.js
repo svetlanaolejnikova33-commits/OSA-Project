@@ -1,5 +1,5 @@
-import { getAllSupplierBrands } from "../supplierSourcesRegistry";
-import { getRegistryCacheSnapshot } from "./registryCache";
+import { getAllSupplierBrands } from "../supplierSourcesRegistry.js";
+import { getRegistryCacheSnapshot } from "./registryCache.js";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";

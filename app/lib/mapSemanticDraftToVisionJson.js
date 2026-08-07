@@ -1,5 +1,5 @@
-import { asConfidence } from "./validateSemanticDraft";
-import { resolvePrimarySceneObject } from "./visualProduct/visualFingerprint";
+import { asConfidence } from "./validateSemanticDraft.js";
+import { resolvePrimarySceneObject } from "./visualProduct/visualFingerprint.js";
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -308,7 +308,7 @@ function inferSearchConstraints(visionCore) {
  * Preserves distinctive construction/features when present in the draft.
  *
  * @param {object|null|undefined} semanticDraft
- * @returns {import("./visionJsonContract").VisionJson | null}
+ * @returns {import("./visionJsonContract.js").VisionJson | null}
  */
 export function mapSemanticDraftToVisionJson(semanticDraft) {
   if (!semanticDraft || typeof semanticDraft !== "object") return null;
@@ -396,7 +396,7 @@ export function mapSemanticDraftToVisionJson(semanticDraft) {
 
   const negative_constraints = inferNegativeConstraints(haystack, mounting);
 
-  /** @type {import("./visionJsonContract").VisionJson} */
+  /** @type {import("./visionJsonContract.js").VisionJson} */
   const vision = {
     category,
     mounting,
