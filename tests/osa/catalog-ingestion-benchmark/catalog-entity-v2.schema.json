@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://osa.local/benchmark/catalog-entity-v2.schema.json",
+  "title": "Benchmark Catalog Entity Contract v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identity", "relationships", "media", "procurement_attributes", "provenance_quality"],
+  "properties": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_id", "manufacturer_id", "entity_type", "source_identity_key", "article", "title", "official_url", "registry_category_id", "procurement_eligible"],
+      "properties": {
+        "entity_id": { "type": "string", "minLength": 1 },
+        "manufacturer_id": { "type": "string", "minLength": 1 },
+        "entity_type": { "enum": ["product_model", "sellable_item", "configuration", "component", "collection"] },
+        "source_identity_key": { "type": "string", "minLength": 1 },
+        "article": { "type": ["string", "null"] },
+        "title": { "type": "string", "minLength": 1 },
+        "official_url": { "type": "string", "format": "uri" },
+        "registry_category_id": { "type": ["string", "null"] },
+        "procurement_eligible": { "type": "boolean" }
+      }
+    },
+    "relationships": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["member_of", "variant_of", "configured_from", "component_of"],
+      "properties": {
+        "member_of": { "$ref": "#/$defs/entityIds" },
+        "variant_of": { "$ref": "#/$defs/entityIds" },
+        "configured_from": { "$ref": "#/$defs/componentRelations" },
+        "component_of": { "$ref": "#/$defs/entityIds" }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["records", "primary_image_id"],
+      "properties": {
+        "records": { "type": "array", "items": { "$ref": "#/$defs/mediaRecord" } },
+        "primary_image_id": { "type": ["string", "null"] }
+      }
+    },
+    "procurement_attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimensions", "specifications", "material", "finish", "color", "mounting", "price", "currency", "availability"],
+      "properties": {
+        "dimensions": {}, "specifications": {}, "material": {}, "finish": {}, "color": {}, "mounting": {},
+        "price": { "type": ["number", "null"], "minimum": 0 },
+        "currency": { "type": ["string", "null"] },
+        "availability": {}
+      }
+    },
+    "provenance_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_url", "source_type", "retrieved_at", "source_snapshot_id", "field_evidence", "field_confidence", "extraction_provider", "extraction_run_id", "content_hash", "validation_warnings"],
+      "properties": {
+        "source_url": { "type": "string", "format": "uri" },
+        "source_type": { "type": "string", "minLength": 1 },
+        "retrieved_at": { "type": "string", "minLength": 1 },
+        "source_snapshot_id": { "type": "string", "minLength": 1 },
+        "field_evidence": { "type": "object" },
+        "field_confidence": { "type": "object" },
+        "extraction_provider": { "type": "string", "minLength": 1 },
+        "extraction_run_id": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": "string", "minLength": 1 },
+        "validation_warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "entityIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "componentRelations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entity_id", "quantity"],
+        "properties": {
+          "entity_id": { "type": "string", "minLength": 1 },
+          "quantity": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "mediaRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_id", "official_url", "media_type", "entity_id", "is_primary", "source_url", "content_hash"],
+      "properties": {
+        "media_id": { "type": "string", "minLength": 1 },
+        "official_url": { "type": "string", "format": "uri" },
+        "media_type": { "type": "string", "minLength": 1 },
+        "entity_id": { "type": "string", "minLength": 1 },
+        "is_primary": { "type": "boolean" },
+        "source_url": { "type": "string", "format": "uri" },
+        "content_hash": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
