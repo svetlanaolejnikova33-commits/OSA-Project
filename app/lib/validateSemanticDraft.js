@@ -1954,6 +1954,85 @@ function sceneGraphSchema() {
     },
     required: ["maskEditable", "bimRelevant", "skuRelevant", "budgetRelevant"],
   };
+  const quantitySchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      count: { type: "number" }, unit: { type: "string" },
+      grouping: { type: "string" }, arrangement: { type: "string" },
+    },
+    required: ["count", "unit", "grouping", "arrangement"],
+  };
+  const morphologySchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      form: { type: "string" }, geometry: { type: "string" },
+      construction: { type: "string" }, composition: { type: "string" },
+      characteristicFeatures: { type: "array", items: { type: "string" } },
+    },
+    required: ["form", "geometry", "construction", "composition", "characteristicFeatures"],
+  };
+  const appearanceSchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      materialsObserved: { type: "array", items: { type: "string" } },
+      materialHypotheses: { type: "array", items: { type: "string" } },
+      colors: { type: "array", items: { type: "string" } },
+      textures: { type: "array", items: { type: "string" } },
+      patterns: { type: "array", items: { type: "string" } },
+      finishes: { type: "array", items: { type: "string" } },
+    },
+    required: ["materialsObserved", "materialHypotheses", "colors", "textures", "patterns", "finishes"],
+  };
+  const installationSchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      mounting: { type: "array", items: { type: "string" } },
+      visibleHardware: { type: "array", items: { type: "string" } },
+      visibleComponents: { type: "array", items: { type: "string" } },
+    },
+    required: ["mounting", "visibleHardware", "visibleComponents"],
+  };
+  const evidenceSchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      regionDescription: { type: "string" },
+      visibleFeatures: { type: "array", items: { type: "string" } },
+      confidence: { type: "number" },
+    },
+    required: ["regionDescription", "visibleFeatures", "confidence"],
+  };
+  const uncertaintySchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      unknownFields: { type: "array", items: { type: "string" } },
+      hypotheses: { type: "array", items: { type: "string" } },
+    },
+    required: ["unknownFields", "hypotheses"],
+  };
+  const positionSchema = {
+    type: "object", additionalProperties: false,
+    properties: {
+      horizontal: { type: "string" }, vertical: { type: "string" }, depth: { type: "string" },
+    },
+    required: ["horizontal", "vertical", "depth"],
+  };
+  const nodeProperties = {
+    id: { type: "string" }, labelRu: { type: "string" }, type: { type: "string" },
+    categoryId: { type: "string" }, supplierCategoryId: { type: "string" },
+    zoneId: { type: "string" }, position: positionSchema,
+    visualWeight: { type: "string" }, replacementRisk: { type: "string" },
+    editablePotential: { type: "string" }, budgetWeight: { type: "string" },
+    materialGuess: { type: "string" }, colorGuess: { type: "string" },
+    confidence: { type: "number" }, quantity: quantitySchema, morphology: morphologySchema,
+    appearance: appearanceSchema, installation: installationSchema,
+    evidence: evidenceSchema, uncertainty: uncertaintySchema, futureReady: futureReadySchema,
+  };
+  const nodeRequired = [
+    "id", "labelRu", "type", "categoryId", "supplierCategoryId", "zoneId", "position",
+    "visualWeight", "replacementRisk", "editablePotential", "budgetWeight", "materialGuess",
+    "colorGuess", "confidence", "quantity", "morphology", "appearance", "installation",
+    "evidence", "uncertainty", "futureReady",
+  ];
 
   return {
     type: "object",
@@ -1978,6 +2057,13 @@ function sceneGraphSchema() {
             confidence: { type: "number" },
           },
           required: ["id", "labelRu", "type", "position", "role", "relatedObjects", "confidence"],
+        },
+      },
+      surfaces: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false,
+          properties: nodeProperties, required: nodeRequired,
         },
       },
       objects: {
@@ -2010,6 +2096,12 @@ function sceneGraphSchema() {
             colorGuess: { type: "string" },
             confidence: { type: "number" },
             futureReady: futureReadySchema,
+            quantity: quantitySchema,
+            morphology: morphologySchema,
+            appearance: appearanceSchema,
+            installation: installationSchema,
+            evidence: evidenceSchema,
+            uncertainty: uncertaintySchema,
           },
           required: [
             "id",
@@ -2027,6 +2119,12 @@ function sceneGraphSchema() {
             "colorGuess",
             "confidence",
             "futureReady",
+            "quantity",
+            "morphology",
+            "appearance",
+            "installation",
+            "evidence",
+            "uncertainty",
           ],
         },
       },
@@ -2040,8 +2138,9 @@ function sceneGraphSchema() {
             toObjectId: { type: "string" },
             relation: { type: "string" },
             confidence: { type: "number" },
+            evidence: { type: "string" },
           },
-          required: ["fromObjectId", "toObjectId", "relation", "confidence"],
+          required: ["fromObjectId", "toObjectId", "relation", "confidence", "evidence"],
         },
       },
       preservationRules: {
@@ -2064,6 +2163,7 @@ function sceneGraphSchema() {
       "coordinateSystem",
       "confidence",
       "zones",
+      "surfaces",
       "objects",
       "relationships",
       "preservationRules",

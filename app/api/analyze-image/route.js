@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { mapSemanticDraftToVisionJson } from "../../lib/mapSemanticDraftToVisionJson.js";
+import { buildSceneInventoryFromSemanticDraft } from "../../lib/sceneInventory/buildSceneInventoryFromSemanticDraft.js";
+import { buildRetrievalBriefQueue } from "../../lib/sceneInventory/buildRetrievalBrief.js";
 import {
   extractJsonObject,
   getSemanticDraftJsonSchema,
@@ -49,14 +51,19 @@ specAnalysis:
 pipelines must stay empty graph shells with ready=false.
 
 sceneGraph:
-- describe the scene as an interior designer and spatial analyst
-- include only visible or logically obvious elements; do not invent hidden objects
-- if exact placement is unclear, use unknown
-- zones must describe functional areas with position, role, and relatedObjects
-- objects must describe visible scene elements with zoneId, relative position, visualWeight, replacementRisk, editablePotential, budgetWeight, materialGuess, colorGuess, categoryId, supplierCategoryId, and futureReady flags
-- relationships must be practical and useful for future replacement, masking, budgeting, and BIM linking
+- this is factual Vision Observation of the complete scene, not product recognition or redesign
+- enumerate every visible procurement- or estimate-significant surface and object as its own node; never collapse the scene into one hero object
+- zones describe functional areas and bind nodes through stable IDs
+- surfaces describe visible architectural envelope and finish areas separately from movable or installed objects
+- each surface and object owns its attributes; never copy attributes from a neighbouring node
+- for every node report quantity/grouping/arrangement; morphology (form, geometry, construction, composition, characteristicFeatures); appearance (visually observed materials separately from material hypotheses, colors, textures, patterns, finishes); installation (mounting, visibleHardware, visibleComponents); evidence; and uncertainty
+- materialsObserved contains only visually supported material facts; uncertain material identity belongs only in materialHypotheses
+- evidence.regionDescription identifies where the node is visible and evidence.visibleFeatures lists the direct visual basis
+- uncertainty.unknownFields explicitly records unavailable characteristics; do not infer hidden construction, dimensions, brands, models, or SKU
+- part-whole must use separate nodes when a visible component is independently estimate-significant; otherwise keep it in visibleComponents and characteristicFeatures
+- relationships must reference valid zone/surface/object IDs and preserve part-whole, object-object, and object-surface facts
 - examples: sofa grouped_with coffee table; pendant lights dining zone; rug anchors lounge zone; curtains frame window; bed grouped_with nightstands; kitchen cabinets aligned_with wall
-- allowed relations include above, below, next_to, on_top_of, behind, in_front_of, aligned_with, grouped_with, lights, supports, frames, anchors
+- allowed relations include above, below, next_to, on_top_of, behind, in_front_of, aligned_with, grouped_with, lights, supports, frames, anchors, part_of, has_part, mounted_on, attached_to, covers, inside, contains, intersects
 - preservationRules must capture what should stay stable in future edits
 
 editableObjects:
@@ -130,28 +137,17 @@ async function requestVisionAnalysis(openai, imageBase64, mimeType, languageMode
     ],
   };
 
-  try {
-    return await openai.chat.completions.create({
-      ...request,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "semantic_draft",
-          strict: true,
-          schema: getSemanticDraftJsonSchema("full"),
-        },
+  return openai.chat.completions.create({
+    ...request,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "semantic_draft",
+        strict: true,
+        schema: getSemanticDraftJsonSchema("full"),
       },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/json_schema|response_format|strict/i.test(message)) {
-      throw error;
-    }
-    return openai.chat.completions.create({
-      ...request,
-      response_format: { type: "json_object" },
-    });
-  }
+    },
+  });
 }
 
 export async function POST(request) {
@@ -182,12 +178,16 @@ export async function POST(request) {
       extractedPalette,
     });
 
+    const sceneInventory = buildSceneInventoryFromSemanticDraft(semanticDraft);
+    const retrievalBriefQueue = buildRetrievalBriefQueue(sceneInventory);
     const visionCandidate = mapSemanticDraftToVisionJson(semanticDraft);
     const visionValidation = validateVisionJson(visionCandidate);
 
     if (!visionValidation.ok) {
       return Response.json({
         semanticDraft,
+        sceneInventory,
+        retrievalBriefQueue,
         vision: null,
         error: "Vision JSON validation failed.",
         visionErrors: visionValidation.errors,
@@ -196,6 +196,8 @@ export async function POST(request) {
 
     return Response.json({
       semanticDraft,
+      sceneInventory,
+      retrievalBriefQueue,
       vision: visionValidation.vision,
     });
   } catch (error) {

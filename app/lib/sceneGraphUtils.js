@@ -23,6 +23,14 @@ const RELATIONS = new Set([
   "supports",
   "frames",
   "anchors",
+  "part_of",
+  "has_part",
+  "mounted_on",
+  "attached_to",
+  "covers",
+  "inside",
+  "contains",
+  "intersects",
 ]);
 const IMPORTANCE_LEVELS = new Set(["low", "medium", "high"]);
 
@@ -32,6 +40,63 @@ function asArray(value) {
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asStrings(value) {
+  return [...new Set(asArray(value).map(asString).filter(Boolean))];
+}
+
+function normalizeQuantity(raw) {
+  return {
+    count: Math.max(1, Number(raw?.count) || 1),
+    unit: asString(raw?.unit) || "item",
+    grouping: asString(raw?.grouping) || "single",
+    arrangement: asString(raw?.arrangement),
+  };
+}
+
+function normalizeMorphology(raw) {
+  return {
+    form: asString(raw?.form),
+    geometry: asString(raw?.geometry),
+    construction: asString(raw?.construction),
+    composition: asString(raw?.composition),
+    characteristicFeatures: asStrings(raw?.characteristicFeatures),
+  };
+}
+
+function normalizeAppearance(raw, legacy = {}) {
+  return {
+    materialsObserved: asStrings(raw?.materialsObserved),
+    materialHypotheses: asStrings(raw?.materialHypotheses || (legacy.materialGuess ? [legacy.materialGuess] : [])),
+    colors: asStrings(raw?.colors || (legacy.colorGuess ? [legacy.colorGuess] : [])),
+    textures: asStrings(raw?.textures),
+    patterns: asStrings(raw?.patterns),
+    finishes: asStrings(raw?.finishes),
+  };
+}
+
+function normalizeInstallation(raw) {
+  return {
+    mounting: asStrings(raw?.mounting),
+    visibleHardware: asStrings(raw?.visibleHardware),
+    visibleComponents: asStrings(raw?.visibleComponents),
+  };
+}
+
+function normalizeEvidence(raw, confidence) {
+  return {
+    regionDescription: asString(raw?.regionDescription),
+    visibleFeatures: asStrings(raw?.visibleFeatures),
+    confidence: asNumber(raw?.confidence, confidence),
+  };
+}
+
+function normalizeUncertainty(raw) {
+  return {
+    unknownFields: asStrings(raw?.unknownFields),
+    hypotheses: asStrings(raw?.hypotheses),
+  };
 }
 
 function asNumber(value, fallback = DEFAULT_CONFIDENCE) {
@@ -61,6 +126,7 @@ function emptySceneGraph() {
     coordinateSystem: "relative_2d",
     confidence: DEFAULT_CONFIDENCE,
     zones: [],
+    surfaces: [],
     objects: [],
     relationships: [],
     preservationRules: [],
@@ -144,6 +210,12 @@ function normalizeObject(raw, index, zoneIds) {
     materialGuess: asString(raw?.materialGuess),
     colorGuess: asString(raw?.colorGuess),
     confidence: asNumber(raw?.confidence),
+    quantity: normalizeQuantity(raw?.quantity),
+    morphology: normalizeMorphology(raw?.morphology),
+    appearance: normalizeAppearance(raw?.appearance, raw),
+    installation: normalizeInstallation(raw?.installation),
+    evidence: normalizeEvidence(raw?.evidence, asNumber(raw?.confidence)),
+    uncertainty: normalizeUncertainty(raw?.uncertainty),
     futureReady: {
       maskEditable: Boolean(raw?.futureReady?.maskEditable),
       bimRelevant: Boolean(raw?.futureReady?.bimRelevant),
@@ -163,17 +235,55 @@ function normalizeObject(raw, index, zoneIds) {
   return withSourceMetadata(object, raw);
 }
 
-function normalizeRelationship(raw, objectIds, zoneIds) {
+function normalizeSurface(raw, index, zoneIds) {
+  const zoneId = asString(raw?.zoneId);
+  const confidence = asNumber(raw?.confidence);
+  return withSourceMetadata({
+    id: makeId("surface", index, raw?.id),
+    labelRu: asString(raw?.labelRu) || "Surface " + (index + 1),
+    type: asString(raw?.type) || "surface",
+    categoryId: asString(raw?.categoryId),
+    supplierCategoryId: asString(raw?.supplierCategoryId),
+    zoneId: zoneIds.has(zoneId) ? zoneId : UNKNOWN_ZONE_ID,
+    position: {
+      horizontal: pickEnum(raw?.position?.horizontal, HORIZONTAL_POSITIONS, "unknown"),
+      vertical: pickEnum(raw?.position?.vertical, VERTICAL_POSITIONS, "unknown"),
+      depth: pickEnum(raw?.position?.depth, DEPTH_POSITIONS, "unknown"),
+    },
+    quantity: normalizeQuantity(raw?.quantity),
+    morphology: normalizeMorphology(raw?.morphology),
+    appearance: normalizeAppearance(raw?.appearance, raw),
+    installation: normalizeInstallation(raw?.installation),
+    evidence: normalizeEvidence(raw?.evidence, confidence),
+    uncertainty: normalizeUncertainty(raw?.uncertainty),
+    visualWeight: pickEnum(raw?.visualWeight, LEVELS, "medium"),
+    replacementRisk: pickEnum(raw?.replacementRisk, LEVELS, "medium"),
+    editablePotential: pickEnum(raw?.editablePotential, LEVELS, "medium"),
+    budgetWeight: pickEnum(raw?.budgetWeight, LEVELS, "medium"),
+    materialGuess: asString(raw?.materialGuess),
+    colorGuess: asString(raw?.colorGuess),
+    confidence,
+    futureReady: {
+      maskEditable: Boolean(raw?.futureReady?.maskEditable),
+      bimRelevant: raw?.futureReady?.bimRelevant ?? true,
+      skuRelevant: Boolean(raw?.futureReady?.skuRelevant),
+      budgetRelevant: raw?.futureReady?.budgetRelevant ?? true,
+    },
+  }, raw);
+}
+
+function normalizeRelationship(raw, nodeIds, zoneIds) {
   const fromObjectId = asString(raw?.fromObjectId);
   const toObjectId = asString(raw?.toObjectId);
   if (!fromObjectId || !toObjectId) return null;
-  if (!objectIds.has(fromObjectId) && !zoneIds.has(fromObjectId)) return null;
-  if (!objectIds.has(toObjectId) && !zoneIds.has(toObjectId)) return null;
+  if (!nodeIds.has(fromObjectId) && !zoneIds.has(fromObjectId)) return null;
+  if (!nodeIds.has(toObjectId) && !zoneIds.has(toObjectId)) return null;
   return {
     fromObjectId,
     toObjectId,
     relation: pickEnum(raw?.relation, RELATIONS, "grouped_with"),
     confidence: asNumber(raw?.confidence),
+    evidence: asString(raw?.evidence),
   };
 }
 
@@ -414,14 +524,15 @@ export function normalizeSceneGraph(raw, semanticDraft = null) {
   }
 
   const objects = rawObjects.map((object, index) => normalizeObject(object, index, zoneIds));
-  const objectIds = new Set(objects.map((object) => object.id));
+  const surfaces = asArray(source.surfaces).map((surface, index) => normalizeSurface(surface, index, zoneIds));
+  const nodeIds = new Set([...objects, ...surfaces].map((node) => node.id));
 
   const relationships = asArray(source.relationships)
-    .map((relationship) => normalizeRelationship(relationship, objectIds, zoneIds))
+    .map((relationship) => normalizeRelationship(relationship, nodeIds, zoneIds))
     .filter(Boolean);
 
   const preservationRules = asArray(source.preservationRules)
-    .map((rule, index) => normalizePreservationRule(rule, index, objectIds, zoneIds))
+    .map((rule, index) => normalizePreservationRule(rule, index, nodeIds, zoneIds))
     .filter(Boolean);
 
   const spaceType =
@@ -437,6 +548,7 @@ export function normalizeSceneGraph(raw, semanticDraft = null) {
     coordinateSystem: asString(source.coordinateSystem) || "relative_2d",
     confidence: asNumber(source.confidence),
     zones,
+    surfaces,
     objects,
     relationships,
     preservationRules,
@@ -475,8 +587,10 @@ export function getSceneGraphSummary(sceneGraph) {
   const graph = sceneGraph && typeof sceneGraph === "object" ? sceneGraph : emptySceneGraph();
   const zones = asArray(graph.zones).filter((zone) => zone.id !== UNKNOWN_ZONE_ID);
   const objects = asArray(graph.objects);
+  const surfaces = asArray(graph.surfaces);
   return {
     zoneCount: zones.length,
+    surfaceCount: surfaces.length,
     objectCount: objects.length,
     editableCount: getEditableObjects(graph).length,
     budgetRelevantCount: getBudgetRelevantObjects(graph).length,
