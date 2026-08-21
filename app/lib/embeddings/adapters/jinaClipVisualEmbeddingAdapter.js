@@ -10,6 +10,11 @@ export function createJinaClipVisualEmbeddingAdapter({ apiKey = process.env.JINA
     const image = await resolveImageEmbeddingInput(input);
     return assertEmbeddingVector(await fetchJinaEmbeddingVector({ image: image.image }, { apiKey, task }));
   }
+  async function embedBrief(brief) {
+    const semanticQuery = typeof brief?.semantic_query === "string" ? brief.semantic_query.trim() : "";
+    if (!semanticQuery) throw new Error("Retrieval Brief requires semantic_query.");
+    return assertEmbeddingVector(await fetchJinaEmbeddingVector(semanticQuery, { apiKey, task: "retrieval.query" }));
+  }
   return Object.freeze({
     provider_id: "jina",
     model_id: JINA_EMBEDDING_MODEL,
@@ -22,5 +27,6 @@ export function createJinaClipVisualEmbeddingAdapter({ apiKey = process.env.JINA
     }),
     embedCatalogImage: (input) => embed(input, "retrieval.query"),
     embedQueryImage: (input) => embed(input, "retrieval.query"),
+    embedRetrievalBrief: embedBrief,
   });
 }

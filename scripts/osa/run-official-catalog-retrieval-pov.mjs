@@ -12,6 +12,7 @@ import {
 } from "../../app/lib/ccn/validateLivePovRetrievalCandidates.js";
 import { POST as analyzeImage } from "../../app/api/analyze-image/route.js";
 import { runChiefCatalogNavigatorLive } from "../../app/lib/ccn/live/ccnLiveAdapter.js";
+import { selectLightingRetrievalBrief } from "../../app/lib/sceneInventory/buildRetrievalBrief.js";
 
 async function loadLocalEnv() {
   const raw = await readFile(resolve(process.cwd(), ".env.local"), "utf8").catch(() => "");
@@ -39,16 +40,6 @@ const embeddingProvider = createJinaClipVisualEmbeddingAdapter();
 const sourceAdapter = createModeluxOfficialCatalogAdapter({ limit: catalogLimit });
 const indexes = await buildOfficialCatalogIndexes({ sourceAdapter, embeddingProvider });
 const query_throttle_wait_ms = await waitForOfficialCatalogQuerySlot(indexes);
-const retrievalStartedAt = Date.now();
-const candidates = await runInternalRegistryRetrieval({
-  query: { imageBase64, mimeType: "image/jpeg" },
-  indexes,
-  embeddingProvider,
-  topK,
-});
-const retrieval_ms = Date.now() - retrievalStartedAt;
-
-const ccnStartedAt = Date.now();
 const response = await analyzeImage(new Request("http://localhost/api/analyze-image", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -56,6 +47,18 @@ const response = await analyzeImage(new Request("http://localhost/api/analyze-im
 }));
 const analysis = await response.json();
 if (!response.ok || !analysis.vision) throw new Error(`Image-derived Vision failed: ${analysis.error || response.status}`);
+const retrievalBrief = selectLightingRetrievalBrief(analysis.sceneInventory);
+if (!retrievalBrief) throw new Error("CVO did not produce a skuRelevant + budgetRelevant lighting Retrieval Brief.");
+const retrievalStartedAt = Date.now();
+const candidates = await runInternalRegistryRetrieval({
+  query: { retrievalBrief },
+  indexes,
+  embeddingProvider,
+  topK,
+});
+const retrieval_ms = Date.now() - retrievalStartedAt;
+
+const ccnStartedAt = Date.now();
 const liveNavigator = createLivePovNavigator({ navigator: runChiefCatalogNavigatorLive });
 const validated = await validateLivePovRetrievalCandidates({
   candidates,
@@ -67,7 +70,15 @@ const accepted = validated.find((candidate) => candidate.ccn_g3.outcome === "acc
 
 console.log(JSON.stringify({
   run_type: "independent_full_scene_real_query",
-  query_inputs: { pixels_only: true, ocr_used: false, filename_used_as_signal: false, metadata_used: false },
+  scene_inventory: analysis.sceneInventory,
+  retrieval_brief: retrievalBrief,
+  query_inputs: {
+    source_input: "image",
+    retrieval_query: "retrieval_brief",
+    ocr_used: false,
+    filename_used_as_signal: false,
+    metadata_used: false,
+  },
   source: {
     manufacturer_id: indexes.source_snapshot.manufacturer_id,
     source_adapter_id: indexes.source_snapshot.source_adapter_id,

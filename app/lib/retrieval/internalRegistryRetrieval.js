@@ -7,7 +7,13 @@ export async function runInternalRegistryRetrieval({ query, indexes, embeddingPr
   if (visual.provider_id !== provider.provider_id || visual.model_id !== provider.model_id || visual.model_version !== provider.model_version) {
     throw new Error("Query embedding provider/version does not match Visual Index.");
   }
-  const queryVector = await provider.embedQueryImage(query);
+  const retrievalBrief = query?.retrievalBrief;
+  if (retrievalBrief && typeof provider.embedRetrievalBrief !== "function") {
+    throw new Error("Visual embedding provider does not support Retrieval Brief queries.");
+  }
+  const queryVector = retrievalBrief
+    ? await provider.embedRetrievalBrief(retrievalBrief)
+    : await provider.embedQueryImage(query);
   const products = new Map(indexes.product_index.records.map((record) => [record.product_id, record]));
   const media = new Map(indexes.media_index.records.map((record) => [record.media_id, record]));
   return searchVisualIndex(visual, queryVector, topK).map((hit, rank) => ({
@@ -17,6 +23,12 @@ export async function runInternalRegistryRetrieval({ query, indexes, embeddingPr
     article: hit.article,
     product: products.get(hit.product_id),
     media: media.get(hit.media_id),
-    retrieval_provenance: { provider_id: hit.provider_id, model_id: hit.model_id, model_version: hit.model_version },
+    retrieval_provenance: {
+      provider_id: hit.provider_id,
+      model_id: hit.model_id,
+      model_version: hit.model_version,
+      query_type: retrievalBrief ? "scene_inventory_retrieval_brief" : "image",
+      inventory_item_id: retrievalBrief?.inventory_item_id || null,
+    },
   }));
 }
