@@ -1,0 +1,91 @@
+{
+  "manifest_version": "catalog-entity-v2",
+  "catalog_id": "oprime",
+  "role": "configurable_hierarchy_corpus",
+  "live_gold_ready": false,
+  "preparation_note": "Independent gold with confirmed product_model source pointers only. Composition, components, quantities, M1 sofa fixtures, procurement eligibility, attributes, and media hashes remain UNKNOWN and must not be inferred from configuration or SKU names.",
+  "repeatability_identity_match": null,
+  "entities": [
+    {
+      "identity": {
+        "entity_id": "3b8055d89b0eda12cb3ef1e8894d3483471aa750b0cec3ca6a05ad828183a9ea",
+        "manufacturer_id": "oprime",
+        "entity_type": "product_model",
+        "source_identity_key": "model:mercury",
+        "article": null,
+        "title": "МЕРКУРИЙ",
+        "official_url": "https://oprime.ru/modeli/mercury",
+        "registry_category_id": null,
+        "procurement_eligible": false
+      },
+      "relationships": {
+        "member_of": [],
+        "variant_of": [],
+        "configured_from": [],
+        "component_of": []
+      },
+      "media": {
+        "records": [],
+        "primary_image_id": null
+      },
+      "procurement_attributes": {
+        "dimensions": null,
+        "specifications": null,
+        "material": null,
+        "finish": null,
+        "color": null,
+        "mounting": null,
+        "price": null,
+        "currency": null,
+        "availability": null
+      },
+      "provenance_quality": {
+        "source_url": "https://oprime.ru/modeli/mercury",
+        "source_type": "official_product_page",
+        "retrieved_at": "2026-08-21T00:00:00.000Z",
+        "source_snapshot_id": "independent-gold-oprime-mercury-pointers-v1",
+        "field_evidence": {
+          "identity.title": {
+            "source_url": "https://oprime.ru/modeli/mercury",
+            "locator": "official_model_page"
+          },
+          "identity.official_url": {
+            "source_url": "https://oprime.ru/modeli/mercury",
+            "locator": "official_model_page"
+          },
+          "technical_pdf": {
+            "source_url": "https://oprime.ru/api/files/Catalog/image/ModelLinePage/mercury/%D0%A2%D0%B5%D1%85%D0%BD%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%BE%D0%B5_%D0%BE%D0%BF%D0%B8%D1%81%D0%B0%D0%BD%D0%B8%D0%B5_%D0%BD%D0%B0_mercury.pdf",
+            "locator": "official_catalog_pdf"
+          }
+        },
+        "field_confidence": {
+          "identity.title": 1,
+          "identity.official_url": 1,
+          "technical_pdf": 1
+        },
+        "extraction_provider": "independent_gold_manifest",
+        "extraction_run_id": "independent-gold-oprime-v1",
+        "content_hash": "unverified:source-pointer-only",
+        "validation_warnings": [
+          "procurement_eligible_not_evidenced",
+          "content_hash_unverified",
+          "composition_unknown",
+          "components_unknown",
+          "attributes_unknown",
+          "media_unknown"
+        ]
+      }
+    }
+  ],
+  "unknown": {
+    "excluded": [
+      "configured_from / composition",
+      "component entities ДВЛ / С1С / ДВП",
+      "quantities inferred from configuration names",
+      "O'PRIME M1 sofa structural fixtures",
+      "procurement flags as evidenced facts",
+      "media hashes",
+      "attributes"
+    ]
+  }
+}

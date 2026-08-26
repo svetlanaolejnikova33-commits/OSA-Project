@@ -1,0 +1,20 @@
+{
+  "manifest_version": "catalog-entity-v2",
+  "catalog_id": "modelux",
+  "role": "simple_sku_corpus",
+  "live_gold_ready": false,
+  "preparation_note": "Independent gold placeholder only. Structural Modelux fixtures under ../fixtures/ are not live catalog truth and must not be copied here. No unconfirmed SKU, collection, attribute, or media facts are asserted.",
+  "repeatability_identity_match": null,
+  "entities": [],
+  "unknown": {
+    "reason": "No independently confirmed Modelux entity facts are available for Contract v2 gold yet.",
+    "excluded_from_structural_fixtures": [
+      "collection Fixture Modern",
+      "sellable_item MX-001",
+      "modelux.example URLs",
+      "attributes",
+      "media",
+      "procurement flags"
+    ]
+  }
+}
