@@ -6,6 +6,7 @@ import { normalizeProviderOutput, validateEntityShape, createProviderResult } fr
 import { createBenchmarkJob } from "./providers/benchmark-job.mjs";
 import { extractWithFirecrawl } from "./providers/firecrawl.mjs";
 import { extractWithContextDev } from "./providers/context-dev.mjs";
+import { mapFirecrawlScrapeToEntities } from "./providers/map-firecrawl-entities.mjs";
 
 async function runDryPath(providerId, extract) {
   const job = createBenchmarkJob({
@@ -54,11 +55,41 @@ async function runDryPath(providerId, extract) {
 const firecrawl = await runDryPath("firecrawl", extractWithFirecrawl);
 const contextDev = await runDryPath("context.dev", extractWithContextDev);
 
+const mapped = mapFirecrawlScrapeToEntities({
+  source_url: "https://oprime.ru/modeli/mercury",
+  extraction_run_id: "offline-map:firecrawl:v1",
+  firecrawl: {
+    success: true,
+    data: {
+      markdown: "# МЕРКУРИЙ\n\n[technical pdf](https://oprime.ru/api/files/Catalog/image/ModelLinePage/mercury/spec.pdf)",
+      metadata: {
+        title: "МЕРКУРИЙ",
+        sourceURL: "https://oprime.ru/modeli/mercury",
+      },
+      links: ["https://oprime.ru/api/files/Catalog/image/ModelLinePage/mercury/spec.pdf"],
+    },
+  },
+});
+assert.equal(mapped.length, 1);
+const mappedNormalized = normalizeProviderOutput({ entities: mapped }, {
+  providerId: "firecrawl",
+  extractionRunId: "offline-map:firecrawl:v1",
+});
+assert.equal(mappedNormalized.rejected_entities.length, 0);
+assert.equal(mappedNormalized.normalized_entities.length, 1);
+const mappedEntity = mappedNormalized.normalized_entities[0];
+assert.deepEqual(validateEntityShape(mappedEntity), []);
+assert.equal(mappedEntity.identity.entity_type, "product_model");
+assert.equal(mappedEntity.identity.title, "МЕРКУРИЙ");
+assert.equal(mappedEntity.identity.manufacturer_id, "oprime");
+assert.equal(mappedEntity.identity.source_identity_key, "url:/modeli/mercury");
+assert.equal(mappedEntity.provenance_quality.field_evidence.technical_pdf.source_url.includes(".pdf"), true);
+
 await assert.rejects(() => extractWithFirecrawl({}), /OFFLINE_STUB/);
 await assert.rejects(() => extractWithContextDev({ mode: "live", run_id: "x", source_urls: [] }), /OFFLINE_STUB/);
 
 const providerDir = join(dirname(fileURLToPath(import.meta.url)), "providers");
-for (const name of ["firecrawl.mjs", "context-dev.mjs", "benchmark-job.mjs"]) {
+for (const name of ["firecrawl.mjs", "context-dev.mjs", "benchmark-job.mjs", "map-firecrawl-entities.mjs"]) {
   const source = await readFile(join(providerDir, name), "utf8");
   assert(!source.includes("gold/"), `${name} must not reference gold/`);
   assert(!source.includes("catalog-fixtures"), `${name} must not import fixtures gold`);

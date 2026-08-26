@@ -1,6 +1,7 @@
 import { Agent, fetch as undiciFetch } from "undici";
 import { createProviderResult } from "../benchmark-core.mjs";
 import { isDryRunJob, isLiveJob } from "./benchmark-job.mjs";
+import { mapFirecrawlScrapeToEntities } from "./map-firecrawl-entities.mjs";
 
 const FIRECRAWL_API_BASE = "https://api.firecrawl.dev/v1";
 const firecrawlAgent = new Agent({ connectTimeout: 30_000, bodyTimeout: 60_000 });
@@ -50,9 +51,15 @@ export async function extractWithFirecrawl(job) {
     if (!apiKey) throw new Error("FIRECRAWL_TRANSPORT_ERROR: FIRECRAWL_API_KEY missing");
     const url = job.source_urls[0];
     const { payload, latency_ms } = await scrapeUrl(url, apiKey);
+    const entities = mapFirecrawlScrapeToEntities({
+      source_url: url,
+      firecrawl: payload,
+      extraction_run_id: job.run_id,
+      provider_id: "firecrawl",
+    });
     return createFirecrawlFixtureResult({
       raw_response: {
-        entities: [],
+        entities,
         source_url: url,
         firecrawl: payload,
       },
