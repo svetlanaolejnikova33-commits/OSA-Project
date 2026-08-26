@@ -25,4 +25,10 @@ Run offline proof only:
 node tests/osa/catalog-ingestion-benchmark/run-fixtures.mjs
 ```
 
-The benchmark is ready for independent gold-corpus preparation. It is not ready for a live Firecrawl/Context.dev pilot until that gold exists and separately approved provider entry points are implemented.
+In-memory live entry dry-run (no network, keys, persistence, or gold import):
+
+```powershell
+node tests/osa/catalog-ingestion-benchmark/run-live-dry.mjs
+```
+
+Independent gold lives under `gold/`. Live HTTP transport is not implemented; provider stubs accept only `mode: "dry-run"` BenchmarkJob values and still reject live mode.
