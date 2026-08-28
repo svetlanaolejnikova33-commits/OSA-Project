@@ -70,11 +70,26 @@ assert.equal(entity.identity.official_url, sourceUrl);
 assert(entity.identity.title.includes("МЕРКУР"), `unexpected title: ${entity.identity.title}`);
 assert.equal(entity.identity.source_identity_key, "url:/modeli/mercury");
 assert.equal(entity.relationships.configured_from.length, 0);
-assert.equal(entity.media.records.length, 0);
 assert(entity.provenance_quality.field_evidence["identity.title"]);
 assert(entity.provenance_quality.field_evidence.technical_pdf?.source_url?.includes(".pdf") ?? false);
 
 const markdown = result.raw_response.firecrawl?.data?.markdown;
+const mediaAltByUrl = new Map();
+if (typeof markdown === "string") {
+  for (const match of markdown.matchAll(/!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g)) {
+    mediaAltByUrl.set(match[2], match[1]?.trim() ?? "");
+  }
+}
+const titleComparable = entity.identity.title.toLowerCase().replace(/[^a-z0-9\u0400-\u04ff]/gi, "");
+for (const record of entity.media.records) {
+  const altComparable = (mediaAltByUrl.get(record.official_url) ?? "").toLowerCase().replace(/[^a-z0-9\u0400-\u04ff]/gi, "");
+  assert(
+    titleComparable.length >= 4 && altComparable.includes(titleComparable),
+    `media alt must prove current product title: ${mediaAltByUrl.get(record.official_url) ?? ""}`,
+  );
+}
+
+const markdownBytes = typeof markdown === "string" ? markdown.length : 0;
 console.log(JSON.stringify({
   ok: true,
   mode: "live",
@@ -84,13 +99,14 @@ console.log(JSON.stringify({
   external_api_calls: result.extraction_metadata.external_api_calls,
   latency_ms: result.latency_ms,
   firecrawl_success: result.raw_response.firecrawl?.success ?? false,
-  markdown_bytes: typeof markdown === "string" ? markdown.length : 0,
+  markdown_bytes: markdownBytes,
   mapped_entities: result.raw_response.entities.length,
   normalized_count: normalized.normalized_entities.length,
   entity_type: entity.identity.entity_type,
   title: entity.identity.title,
   source_identity_key: entity.identity.source_identity_key,
   pdf_evidence: Boolean(entity.provenance_quality.field_evidence.technical_pdf),
+  media_records: entity.media.records.length,
   validation_errors: shapeErrors.length,
   persistence: false,
   gold_imported: false,

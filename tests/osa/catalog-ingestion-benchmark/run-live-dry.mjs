@@ -6,7 +6,7 @@ import { normalizeProviderOutput, validateEntityShape, createProviderResult } fr
 import { createBenchmarkJob } from "./providers/benchmark-job.mjs";
 import { extractWithFirecrawl } from "./providers/firecrawl.mjs";
 import { extractWithContextDev } from "./providers/context-dev.mjs";
-import { mapFirecrawlScrapeToEntities } from "./providers/map-firecrawl-entities.mjs";
+import { inspectFirecrawlSourceGuard, mapFirecrawlScrapeToEntities } from "./providers/map-firecrawl-entities.mjs";
 
 async function runDryPath(providerId, extract) {
   const job = createBenchmarkJob({
@@ -84,6 +84,105 @@ assert.equal(mappedEntity.identity.title, "МЕРКУРИЙ");
 assert.equal(mappedEntity.identity.manufacturer_id, "oprime");
 assert.equal(mappedEntity.identity.source_identity_key, "url:/modeli/mercury");
 assert.equal(mappedEntity.provenance_quality.field_evidence.technical_pdf.source_url.includes(".pdf"), true);
+
+const productPage = mapFirecrawlScrapeToEntities({
+  source_url: "https://catalog.fixture/product/sample-sku-001",
+  extraction_run_id: "offline-map:firecrawl:product-v1",
+  firecrawl: {
+    success: true,
+    data: {
+      markdown: [
+        "![Sample Pendant SAMPLE-001](https://catalog.fixture/storage/sample-001.jpg)",
+        "![Sample Pendant SAMPLE-001](https://catalog.fixture/storage/sample-001.jpg)",
+        "Коллекция  FIXTURE  Артикул  SAMPLE-001  РРЦ:  12 500 ₽",
+        "Характеристики  Материал  Metal, Glass  Диаметр мм  400  Высота мм  230",
+        "Тип цоколя  E27  Общая мощность Вт  60",
+      ].join("  "),
+      metadata: {
+        title: "Catalog | Official Site | Buy lighting from manufacturer",
+        sourceURL: "https://catalog.fixture/product/sample-sku-001",
+        statusCode: 200,
+      },
+    },
+  },
+});
+assert.equal(productPage.length, 1);
+const productEntity = normalizeProviderOutput({ entities: productPage }, {
+  providerId: "firecrawl",
+  extractionRunId: "offline-map:firecrawl:product-v1",
+}).normalized_entities[0];
+assert.deepEqual(validateEntityShape(productEntity), []);
+assert.equal(productEntity.identity.title, "Sample Pendant SAMPLE-001");
+assert.equal(productEntity.identity.article, "SAMPLE-001");
+assert.equal(productEntity.procurement_attributes.price, 12500);
+assert.equal(productEntity.procurement_attributes.currency, "RUB");
+assert.equal(productEntity.procurement_attributes.material, "Metal, Glass");
+assert.equal(productEntity.procurement_attributes.dimensions.diameter_mm, 400);
+assert.equal(productEntity.media.records.length, 1);
+
+const contaminatedProductPage = mapFirecrawlScrapeToEntities({
+  source_url: "https://catalog.fixture/product/sample-sku-002",
+  extraction_run_id: "offline-map:firecrawl:media-filter-v1",
+  firecrawl: {
+    success: true,
+    data: {
+      markdown: [
+        "![Current Pendant SAMPLE-002](https://catalog.fixture/storage/sample-002-a.jpg)",
+        "![Current Pendant SAMPLE-002](https://catalog.fixture/storage/sample-002-b.jpg)",
+        "## Other models in collection",
+        "![Sibling Pendant SAMPLE-001](https://catalog.fixture/storage/sample-001.jpg)",
+        "![file. (70).png](https://catalog.fixture/storage/ambiguous.png)",
+        "Артикул  SAMPLE-002  РРЦ:  9 900 ₽",
+      ].join("\n\n"),
+      metadata: {
+        title: "Catalog | Official Site | Buy lighting from manufacturer",
+        sourceURL: "https://catalog.fixture/product/sample-sku-002",
+        statusCode: 200,
+      },
+    },
+  },
+});
+assert.equal(contaminatedProductPage.length, 1);
+const filteredProductEntity = normalizeProviderOutput({ entities: contaminatedProductPage }, {
+  providerId: "firecrawl",
+  extractionRunId: "offline-map:firecrawl:media-filter-v1",
+}).normalized_entities[0];
+assert.deepEqual(validateEntityShape(filteredProductEntity), []);
+assert.equal(filteredProductEntity.identity.article, "SAMPLE-002");
+assert.equal(filteredProductEntity.media.records.length, 2);
+assert.ok(
+  filteredProductEntity.media.records.every((record) => /sample-002/i.test(record.official_url)),
+  "media.records must exclude related-section and foreign-SKU images",
+);
+
+const errorPageFirecrawl = {
+  success: true,
+  data: {
+    markdown: "Страница не найдена\n\n404",
+    metadata: {
+      title: "Generic site title",
+      sourceURL: "https://catalog.fixture/product/missing",
+      statusCode: 404,
+      error: "Not Found",
+    },
+  },
+};
+const errorGuard = inspectFirecrawlSourceGuard(errorPageFirecrawl);
+assert.equal(errorGuard.rejected, true);
+assert.equal(errorGuard.reason, "http_source_error");
+assert.equal(errorGuard.statusCode, 404);
+assert.equal(errorGuard.error, "Not Found");
+const rejected404 = mapFirecrawlScrapeToEntities({
+  source_url: "https://catalog.fixture/product/missing",
+  extraction_run_id: "offline-map:firecrawl:404-v1",
+  firecrawl: errorPageFirecrawl,
+});
+assert.equal(rejected404.length, 0);
+const rejected404Normalized = normalizeProviderOutput({ entities: rejected404 }, {
+  providerId: "firecrawl",
+  extractionRunId: "offline-map:firecrawl:404-v1",
+});
+assert.equal(rejected404Normalized.normalized_entities.length, 0);
 
 await assert.rejects(() => extractWithFirecrawl({}), /OFFLINE_STUB/);
 await assert.rejects(() => extractWithContextDev({ mode: "live", run_id: "x", source_urls: [] }), /OFFLINE_STUB/);
